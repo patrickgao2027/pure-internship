@@ -1,0 +1,74 @@
+[
+  {
+    "fraction": 1.0,
+    "sample_rows": 1000000,
+    "run_dir": "/cta/users/patrickgao765/uv_vae/sweep_results/run_100pct/run_20260713T111604Z",
+    "procrustes_disparity": 1.8545667510540082e-30,
+    "linear_cka": 1.0,
+    "latent_collapse": 0.8967803716659546,
+    "trustworthiness": 0.9124248570568763,
+    "val_total_loss": 1.120361909866333,
+    "val_numeric_loss": 0.20816788494586944,
+    "val_kl_loss": 14.630896263122558
+  },
+  {
+    "fraction": 0.75,
+    "sample_rows": 750000,
+    "run_dir": "/cta/users/patrickgao765/uv_vae/sweep_results/run_75pct/run_20260713T112151Z",
+    "procrustes_disparity": 0.21765761357262087,
+    "linear_cka": 0.8356125354766846,
+    "latent_collapse": 0.8902726769447327,
+    "trustworthiness": 0.9149691363226,
+    "val_total_loss": 1.1472079440167076,
+    "val_numeric_loss": 0.22680875345280296,
+    "val_kl_loss": 14.454393487227591
+  },
+  {
+    "fraction": 0.5,
+    "sample_rows": 500000,
+    "run_dir": "/cta/users/patrickgao765/uv_vae/sweep_results/run_50pct/run_20260713T112659Z",
+    "procrustes_disparity": 0.2627064322685171,
+    "linear_cka": 0.8053579926490784,
+    "latent_collapse": 0.8979114294052124,
+    "trustworthiness": 0.9065881111445481,
+    "val_total_loss": 1.198536781164316,
+    "val_numeric_loss": 0.23236745710556322,
+    "val_kl_loss": 13.570599996126615
+  },
+  {
+    "fraction": 0.25,
+    "sample_rows": 250000,
+    "run_dir": "/cta/users/patrickgao765/uv_vae/sweep_results/run_25pct/run_20260713T113121Z",
+    "procrustes_disparity": 0.25705097444672753,
+    "linear_cka": 0.7953231334686279,
+    "latent_collapse": 0.8673861026763916,
+    "trustworthiness": 0.9298708596649614,
+    "val_total_loss": 1.291133165359497,
+    "val_numeric_loss": 0.26078889625413076,
+    "val_kl_loss": 11.44683769771031
+  },
+  {
+    "fraction": 0.1,
+    "sample_rows": 100000,
+    "run_dir": "/cta/users/patrickgao765/uv_vae/sweep_results/run_10pct/run_20260713T113435Z",
+    "procrustes_disparity": 0.4591732260536146,
+    "linear_cka": 0.6478166580200195,
+    "latent_collapse": 0.6881108283996582,
+    "trustworthiness": 0.9701470558732069,
+    "val_total_loss": 1.5049049854278564,
+    "val_numeric_loss": 0.32936546206474304,
+    "val_kl_loss": 6.580176035563151
+  },
+  {
+    "fraction": 0.05,
+    "sample_rows": 50000,
+    "run_dir": "/cta/users/patrickgao765/uv_vae/sweep_results/run_5pct/run_20260713T113722Z",
+    "procrustes_disparity": 0.6640017515613692,
+    "linear_cka": 0.4835483431816101,
+    "latent_collapse": 0.5624898076057434,
+    "trustworthiness": 0.9389359133313271,
+    "val_total_loss": 1.7039858102798462,
+    "val_numeric_loss": 0.4761389046907425,
+    "val_kl_loss": 3.6704020500183105
+  }
+]

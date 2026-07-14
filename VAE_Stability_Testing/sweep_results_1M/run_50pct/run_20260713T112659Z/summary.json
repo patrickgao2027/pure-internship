@@ -1,0 +1,35 @@
+{
+  "all_null_features": [
+    "ed",
+    "l1",
+    "l2",
+    "l3",
+    "l4",
+    "l5",
+    "l6",
+    "l7",
+    "q2",
+    "q3",
+    "q4",
+    "q5",
+    "q6",
+    "sd"
+  ],
+  "device": "cpu",
+  "eligible_rows_in_parquet": 50591627,
+  "final_epoch": {
+    "epoch": 10,
+    "train_categorical_loss": 0.30459594293074177,
+    "train_kl_loss": 13.358534292741256,
+    "train_numeric_loss": 0.2330220183188265,
+    "train_total_loss": 1.205544686317444,
+    "val_categorical_loss": 0.2876393084342663,
+    "val_kl_loss": 13.570599996126615,
+    "val_numeric_loss": 0.23236745710556322,
+    "val_total_loss": 1.198536781164316
+  },
+  "row_filter": "st = 'MIXED' AND et = 'MIXED' AND FILT = 1",
+  "run_dir": "/cta/users/patrickgao765/uv_vae/sweep_results/run_50pct/run_20260713T112659Z",
+  "sample_only_null_features": [],
+  "sample_rows": 500000
+}
