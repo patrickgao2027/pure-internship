@@ -8,11 +8,10 @@ from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 
-UV_VAE_ROOT = Path(os.environ.get("UV_VAE_ROOT", Path.home() / "uv_vae")).resolve()
+UV_VAE_ROOT = Path(os.environ.get("UV_VAE_ROOT", Path(__file__).resolve().parents[2])).resolve()
 if str(UV_VAE_ROOT) not in sys.path:
     sys.path.insert(0, str(UV_VAE_ROOT))
 
-import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
 import torch
@@ -212,7 +211,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--kl-weight", type=float, default=0.05)
     parser.add_argument("--train-fraction", type=float, default=0.9)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Training seed (weight init, train/val split, batch order)")
+    parser.add_argument("--data-seed", type=int, default=None,
+                        help="Separate seed for DuckDB row sampling only. "
+                             "When set, --seed controls all training RNG while this "
+                             "controls which rows are selected. Omit to use --seed for both.")
     parser.add_argument("--threads", type=int, default=8)
     parser.add_argument("--feature-spec-path", default=str(UV_VAE_ROOT / "ml_features.json"))
     parser.add_argument(
@@ -270,6 +274,7 @@ def run_sweep(args: argparse.Namespace) -> list[dict]:
             train_fraction=args.train_fraction,
             seed=args.seed,
             threads=args.threads,
+            data_seed=args.data_seed,
         )
 
         t0 = perf_counter()
@@ -324,6 +329,8 @@ def run_sweep(args: argparse.Namespace) -> list[dict]:
 def visualize_results(results: list[dict], output_dir: Path) -> None:
     if not results:
         return
+
+    import matplotlib.pyplot as plt
 
     fractions = [r["fraction"] * 100 for r in results]
     sample_rows = [r["sample_rows"] for r in results]

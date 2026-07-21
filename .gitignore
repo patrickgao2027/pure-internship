@@ -2,3 +2,14 @@ __pycache__/
 data/
 TF Outputs/
 hpc scripts/
+logs/
+VAE_Stability_Testing/epoch_sweep/
+VAE_Stability_Testing/seed_comparison/
+VAE_Stability_Testing/seed_density_sweep/
+VAE_Stability_Testing/seed_sweep_extended/
+VAE_Stability_Testing/sweep_results_c1/
+VAE_Stability_Testing/sweep_results_full/
+VAE_Stability_Testing/sweep_seed_results/
+VAE_Stability_Testing/vs_52M_comparison/
+VAE_Stability_Testing/rq_sweep/
+comparison_results/
