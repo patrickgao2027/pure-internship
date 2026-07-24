@@ -38,6 +38,7 @@ PARQUET="${PARQUET:-/cta/users/patrickgao765/parquet_files/wt0-12-ppm0050.featur
 ###############################################################################
 
 UV_VAE_DIR="${UV_VAE_DIR:-$HOME/uv_vae}"
+KL_TESTING_DIR="${KL_TESTING_DIR:-$HOME/KL_Weight_Testing}"
 RUN_ROOT="${RUN_ROOT:-/cta/users/patrickgao765/uv_vae/kl_sweep_${SLURM_JOB_ID:-manual}}"
 ROW_FILTER="${ROW_FILTER:-st = 'MIXED' AND et = 'MIXED' AND FILT = 1}"
 THREADS="${SLURM_CPUS_PER_TASK:-32}"
@@ -227,7 +228,7 @@ done
 # Compare all checkpoints
 ###############################################################################
 begin_stage "compare all β values"
-python scripts/compare_kl_sweep.py \
+python "$KL_TESTING_DIR/Python Files/compare_kl_sweep.py" \
     --sweep-dir "$RUN_ROOT" \
     --parquet-path "$PARQUET" \
     --feature-spec-path "$UV_VAE_DIR/ml_features.json" \

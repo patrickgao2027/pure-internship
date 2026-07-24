@@ -2,7 +2,7 @@
 
 Run after run_kl_sweep.sh completes:
 
-    python scripts/compare_kl_sweep.py \
+    python "KL_Weight_Testing/Python Files/compare_kl_sweep.py" \
         --sweep-dir /cta/users/patrickgao765/uv_vae/kl_sweep_<jobid> \
         --parquet-path /cta/users/patrickgao765/parquet_files/wt0-12-ppm0050.featuremap.parquet \
         --feature-spec-path ~/uv_vae/ml_features.json
@@ -27,7 +27,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2] / "uv_vae"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
