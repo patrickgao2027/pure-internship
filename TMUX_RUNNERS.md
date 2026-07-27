@@ -51,9 +51,19 @@ installs — the torch allocator limit and the RMM pool that cuDF/cuML draw from
 **per process**, so the runner divides the budget by `CONCURRENCY`. Four workers each
 claiming 16 GB would be 64 GB on a 48 GB card.
 
-Measured from `uv_vae.gpu_budget` for this model (11 categorical + 30 numeric features,
+> **These numbers are provisional — recalibrate before relying on them.** Two known
+> issues: (1) `bytes_per_row` under-counts activations by roughly 1.8× (it misses the
+> pre-concat embedding outputs, the non-inplace `nn.ReLU` outputs in both encoder and
+> decoder, and the `reparameterize` temporaries), only partly offset by
+> `AUTOGRAD_OVERHEAD = 2.5`; and (2) the table below assumes RMM is absent, so torch
+> gets the whole budget. With cuDF/cuML installed, `UV_VAE_RMM_SHARE` (default 0.25)
+> reserves a quarter for RMM and every ceiling drops accordingly — at 16 GB, from
+> ~1,710,000 rows to ~1,282,000. Measure `torch.cuda.max_memory_allocated()` against
+> the prediction on the real node and regenerate this table.
+
+Derived from `uv_vae.gpu_budget` for this model (11 categorical + 30 numeric features,
 hidden `256,128`, latent 16, AMP on): **~6.0 KB of GPU memory per row in a training
-batch.** That gives:
+batch**, which is the figure the caveat above says is low. That gives:
 
 | CONCURRENCY | GPU per worker | Largest safe batch | Threads/worker (32 cores) | Batch-LR configs that fit |
 |---|---|---|---|---|
