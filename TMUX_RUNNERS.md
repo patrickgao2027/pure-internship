@@ -194,10 +194,17 @@ Per-task output is in `<root>/logs/task_<id>.log`; the runner's own output is in
    export BATCH_LR_DIR=$HOME/pure-internship/Batch_Size_Learning_Rate_Testing
    export KL_TESTING_DIR=$HOME/pure-internship/KL_Weight_Testing
    ```
-2. **Strip CRLF**: `sed -i 's/\r$//' $UV_VAE_DIR/scripts/*.sh */scripts/*.sh`.
-   Transferring with `git archive` or `git clone` already gives LF, so this is only
-   needed after an `scp`/`rsync` straight off Windows. The runners also self-heal it
-   at launch, but the first invocation has to be readable.
+2. **Strip CRLF — always, whatever the transfer method.** The repo has no
+   `.gitattributes`, so CRLF is committed into the blobs themselves: every tracked
+   `.sh` file comes out of `git archive` *and* `git clone` with CRLF, not just out of
+   an `scp`/`rsync` off Windows. bash rejects those with `bad interpreter:
+   /bin/bash^M`. `uvv_strip_crlf` self-heals the files a runner is given, but the
+   launcher has to be readable before it can run, so this step cannot be skipped:
+   ```bash
+   find ~/pure-internship -name '*.sh' -exec sed -i 's/\r$//' {} +
+   ```
+   (Adding `*.sh text eol=lf` to a `.gitattributes` and renormalising would retire
+   this step permanently, at the cost of touching every script in one commit.)
 3. **Environment**: `micromamba activate uv_vae` — the runners do this themselves via
    `MAMBA_ENV`, so this step is just to verify the env exists and has the stack.
    Confirm torch was built for Blackwell (`sm_120`); a cu126-or-older wheel has no
