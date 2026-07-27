@@ -42,9 +42,22 @@ tail -f ~/uv_vae/sweep_10M_12345.log    # live-follow while running
 or after it finishes:
 cat ~/uv_vae/sweep_10M_12345.log
 
-# Important Commands for Conda
+# Important Commands for Conda  (tosun.sabanciuniv.edu — CPU cluster, SLURM)
 conda activate patrickg
 conda list
 which python
 python --version
 conda env list
+
+# Important Commands for micromamba  (miletus.sabanciuniv.edu — GPU node, no SLURM)
+micromamba activate uv_vae
+micromamba env list
+micromamba list                                  # packages in the active env
+micromamba run -n uv_vae python -c "import torch; print(torch.cuda.get_arch_list())"
+nvidia-smi                                       # confirm the Blackwell card is visible
+
+# miletus uses tmux, not sbatch — see TMUX_RUNNERS.md
+tmux attach -t train_only        # or batch_lr / kl_sweep
+# Ctrl-b d                       detach, leaves the run going
+tmux ls                          # what is running
+tmux kill-session -t train_only  # stop everything

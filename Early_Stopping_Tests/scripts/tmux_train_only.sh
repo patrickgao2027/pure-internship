@@ -12,7 +12,8 @@
 #     consecutive runs overwrite each other); it is timestamped.
 #   * THREADS is detected from the machine rather than read from
 #     $SLURM_CPUS_PER_TASK, which does not exist here and silently fell back to 32.
-#   * conda 'patrickg' is no longer hardcoded -- .venv is preferred, CONDA_ENV wins.
+#   * conda 'patrickg' is no longer hardcoded -- micromamba 'uv_vae' (MAMBA_ENV) is
+#     the miletus default, then .venv; CONDA_ENV overrides both.
 #   * The GPU ceiling is applied and recorded in the run's training_report.json.
 #
 # Usage:
@@ -176,7 +177,7 @@ else
     uvv_strip_crlf "$UV_VAE_DIR/scripts/tmux_lib.sh" "$EARLY_STOPPING_DIR/scripts/tmux_train_only.sh"
     mkdir -p "$LOG_DIR"
     uvv_export_child_env \
-        UV_VAE_DIR EARLY_STOPPING_DIR CONDA_ENV \
+        UV_VAE_DIR EARLY_STOPPING_DIR CONDA_ENV MAMBA_ENV MAMBA_ROOT_PREFIX \
         RUN_ID RUN_ROOT COMBINED SAMPLE_1 SAMPLE_2 ROW_FILTER SEED \
         GPU_TOTAL_GB THREADS_TOTAL UV_VAE_GPU_OOM_POLICY DUCKDB_MEM \
         BATCH_SIZE EPOCH_CEILING PATIENCE MIN_DELTA AU_THRESHOLD \

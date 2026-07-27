@@ -1,6 +1,7 @@
 # tmux runners (no SLURM)
 
-The new node has a single **NVIDIA RTX PRO 5000 Blackwell, 48 GB** and no scheduler.
+The new node — **`miletus.sabanciuniv.edu`** — has a single **NVIDIA RTX PRO 5000
+Blackwell, 48 GB**, a **micromamba env named `uv_vae`**, and no scheduler.
 These runners rebuild what SLURM used to provide — a bounded work queue, per-task
 logs, resume after a crash, and a resource budget per task — on top of tmux.
 
@@ -141,7 +142,9 @@ Shared by all three runners:
 | `GPU_TOTAL_GB` | `16` | GPU ceiling for the whole sweep, divided by `CONCURRENCY` |
 | `THREADS_TOTAL` | `nproc` | CPU threads for the whole sweep, divided by `CONCURRENCY` |
 | `UV_VAE_GPU_OOM_POLICY` | `warn` | `warn` / `clamp` / `error` — see above |
-| `CONDA_ENV` | *(unset)* | conda env name; otherwise `$UV_VAE_DIR/.venv` is used |
+| `MAMBA_ENV` | `uv_vae` | micromamba env name — the miletus setup |
+| `CONDA_ENV` | *(unset)* | conda env name; overrides `MAMBA_ENV` when set |
+| `MAMBA_ROOT_PREFIX` | `$HOME/micromamba` | only needed if micromamba lives elsewhere |
 | `UV_VAE_DIR` | `$HOME/uv_vae` | Package root |
 | `SEED` | `42` | Also sets `PYTHONHASHSEED` |
 | `TASKS` | all | Space-separated subset, e.g. `TASKS="0 3 4"` |
@@ -179,15 +182,29 @@ Per-task output is in `<root>/logs/task_<id>.log`; the runner's own output is in
 
 ## Deployment checklist for the new node
 
-1. **Copy the tree** so the folders are siblings under `$HOME`: `uv_vae/`,
-   `Early_Stopping_Tests/`, `Batch_Size_Learning_Rate_Testing/`, `KL_Weight_Testing/`.
-   The `Python Files/` layout matters — those scripts locate the package with
-   `parents[2]`, so moving one to a different depth breaks the import silently.
-2. **Strip CRLF**: `sed -i 's/\r$//' uv_vae/scripts/*.sh */scripts/*.sh`. The runners
-   also self-heal this at launch, but the first invocation has to be readable.
-3. **Install**: `cd uv_vae && uv sync`. `pyproject.toml` already pins torch to the
-   CUDA-12.8 index, which is what Blackwell (`sm_120`) needs — a cu126-or-older wheel
-   has no `sm_120` kernels.
+1. **Copy the tree.** Transferring the *repo* as-is works — `Python Files/` scripts
+   resolve the package with `parents[2] / "uv_vae"`, which is satisfied both by the
+   repo layout (root = `PURE Files/`) and by the sibling layout (root = `$HOME`).
+   What matters is only that each script stays exactly two levels under a directory
+   containing `uv_vae/`; changing its depth breaks the import silently.
+   Then point the runners at it:
+   ```bash
+   export UV_VAE_DIR=$HOME/pure-internship/uv_vae
+   export EARLY_STOPPING_DIR=$HOME/pure-internship/Early_Stopping_Tests
+   export BATCH_LR_DIR=$HOME/pure-internship/Batch_Size_Learning_Rate_Testing
+   export KL_TESTING_DIR=$HOME/pure-internship/KL_Weight_Testing
+   ```
+2. **Strip CRLF**: `sed -i 's/\r$//' $UV_VAE_DIR/scripts/*.sh */scripts/*.sh`.
+   Transferring with `git archive` or `git clone` already gives LF, so this is only
+   needed after an `scp`/`rsync` straight off Windows. The runners also self-heal it
+   at launch, but the first invocation has to be readable.
+3. **Environment**: `micromamba activate uv_vae` — the runners do this themselves via
+   `MAMBA_ENV`, so this step is just to verify the env exists and has the stack.
+   Confirm torch was built for Blackwell (`sm_120`); a cu126-or-older wheel has no
+   `sm_120` kernels and every CUDA call fails at runtime:
+   ```bash
+   micromamba run -n uv_vae python -c "import torch; print(torch.__version__, torch.cuda.get_arch_list())"
+   ```
 4. **Preflight**: `python uv_vae/scripts/gpu_preflight.py --batch-size 131072`. It
    checks that `sm_120` is in the wheel's arch list, that `CUBLAS_WORKSPACE_CONFIG` was
    exported *before* python started, that deterministic mode survives a real matmul and
@@ -223,8 +240,11 @@ Notes on differences from the SLURM scripts, so results stay comparable:
   scheduler — so consecutive runs quietly merged into one directory.
 - **`THREADS` is detected, not read from `$SLURM_CPUS_PER_TASK`,** which does not exist
   here and silently fell back to 32 regardless of the real core count.
-- **The environment is `.venv` first, `CONDA_ENV` to override.** conda `patrickg` was
-  hardcoded and has never been verified to contain the full stack.
+- **The environment resolves micromamba `uv_vae` first, then `.venv`; `CONDA_ENV`
+  overrides both.** conda `patrickg` was hardcoded and does not exist on miletus.
+  Critically, `conda shell.bash hook` is *not* a micromamba subcommand — on a node
+  with no conda binary that line expands to nothing and the next `conda activate`
+  aborts the runner under `set -e`, so each branch is guarded with `command -v`.
 - **`training_report.json` now records `gpu_budget`, `gpu_environment` and
   `effective_batch_size`,** so a result can be traced to the device, driver and cap it
   was produced under.

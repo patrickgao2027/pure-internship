@@ -145,8 +145,14 @@ Most runs are configured through **environment variables** consumed by the shell
 
 ## HPC / SLURM environment
 
-- Cluster `tosun.sabanciuniv.edu`, user `patrickgao765`; conda env `patrickg`.
-- SLURM: `--account=adelab --partition=genomics --qos=adelab`.
+- **GPU node `miletus.sabanciuniv.edu`** — one RTX PRO 5000 Blackwell (48 GB), **no SLURM**.
+  Environment is a **micromamba env named `uv_vae`** (`MAMBA_ENV`, the default). Use the
+  tmux runners here, not the `sbatch` scripts — see `TMUX_RUNNERS.md`.
+- Older CPU cluster `tosun.sabanciuniv.edu`, user `patrickgao765`; conda env `patrickg`.
+- SLURM (tosun only): `--account=adelab --partition=genomics --qos=adelab`.
+- Env activation in every `.sh` is manager-agnostic: `CONDA_ENV` wins if set, else
+  micromamba `${MAMBA_ENV:-uv_vae}` if the binary exists, else conda `patrickg`. One
+  script therefore runs on either cluster unedited.
 - Parquet data under `/cta/users/patrickgao765/parquet_files/`.
 - Scripts are edited on Windows, so strip CRLF before submitting: `sed -i 's/\r$//' <script>.sh`.
 - Set `export TQDM_DISABLE=1` for non-interactive jobs.

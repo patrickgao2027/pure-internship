@@ -9,7 +9,8 @@
 #   * GPU_TOTAL_GB is split across workers (both the torch cap and the RMM pool
 #     are per process).
 #   * RUN_ROOT no longer keys off $SLURM_JOB_ID, which collapsed to "manual".
-#   * conda 'patrickg' is no longer hardcoded -- .venv is preferred, CONDA_ENV wins.
+#   * conda 'patrickg' is no longer hardcoded -- micromamba 'uv_vae' (MAMBA_ENV) is
+#     the miletus default, then .venv; CONDA_ENV overrides both.
 #   * Finished betas are skipped on re-launch, so a crash resumes.
 #   * The trailing sacct hint is gone; per-task timings live in the state markers.
 #
@@ -228,7 +229,7 @@ else
     uvv_strip_crlf "$UV_VAE_DIR/scripts/tmux_lib.sh" "$KL_TESTING_DIR/scripts/tmux_kl_sweep.sh"
     mkdir -p "$LOG_DIR"
     uvv_export_child_env \
-        UV_VAE_DIR KL_TESTING_DIR EARLY_STOPPING_DIR CONDA_ENV \
+        UV_VAE_DIR KL_TESTING_DIR EARLY_STOPPING_DIR CONDA_ENV MAMBA_ENV MAMBA_ROOT_PREFIX \
         RUN_ID RUN_ROOT PARQUET ROW_FILTER SEED \
         CONCURRENCY GPU_TOTAL_GB THREADS_TOTAL UV_VAE_GPU_OOM_POLICY \
         KL_WEIGHTS CLUSTER BATCH_SIZE EPOCH_CEILING PATIENCE MIN_DELTA \

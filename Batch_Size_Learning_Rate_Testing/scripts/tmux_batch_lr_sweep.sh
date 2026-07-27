@@ -10,7 +10,8 @@
 #     are per process, so N workers each claiming 16 GB would be 16N GB.
 #   * SWEEP_ROOT no longer keys off $SLURM_ARRAY_JOB_ID (which collapsed to
 #     "manual" without a scheduler and silently merged re-runs into one dir).
-#   * conda 'patrickg' is no longer hardcoded -- .venv is preferred, CONDA_ENV wins.
+#   * conda 'patrickg' is no longer hardcoded -- micromamba 'uv_vae' (MAMBA_ENV) is
+#     the miletus default, then .venv; CONDA_ENV overrides both.
 #   * Completed configs are skipped on re-launch, so a crash resumes.
 #
 # Usage -- launches detached and returns immediately:
@@ -233,7 +234,7 @@ else
     uvv_strip_crlf "$UV_VAE_DIR/scripts/tmux_lib.sh" "$BATCH_LR_DIR/scripts/tmux_batch_lr_sweep.sh"
     mkdir -p "$LOG_DIR"
     uvv_export_child_env \
-        UV_VAE_DIR BATCH_LR_DIR EARLY_STOPPING_DIR CONDA_ENV \
+        UV_VAE_DIR BATCH_LR_DIR EARLY_STOPPING_DIR CONDA_ENV MAMBA_ENV MAMBA_ROOT_PREFIX \
         RUN_ID SWEEP_ROOT COMBINED ROW_FILTER SEED \
         CONCURRENCY GPU_TOTAL_GB THREADS_TOTAL UV_VAE_GPU_OOM_POLICY \
         EPOCH_CEILING PATIENCE MIN_DELTA AU_THRESHOLD EVAL_ROWS \
