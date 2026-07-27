@@ -39,6 +39,7 @@ PARQUET="${PARQUET:-/cta/users/patrickgao765/parquet_files/wt0-12-ppm0050.featur
 
 UV_VAE_DIR="${UV_VAE_DIR:-$HOME/uv_vae}"
 KL_TESTING_DIR="${KL_TESTING_DIR:-$HOME/KL_Weight_Testing}"
+EARLY_STOPPING_DIR="${EARLY_STOPPING_DIR:-$HOME/Early_Stopping_Tests}"
 RUN_ROOT="${RUN_ROOT:-/cta/users/patrickgao765/uv_vae/kl_sweep_${SLURM_JOB_ID:-manual}}"
 ROW_FILTER="${ROW_FILTER:-st = 'MIXED' AND et = 'MIXED' AND FILT = 1}"
 THREADS="${SLURM_CPUS_PER_TASK:-32}"
@@ -172,7 +173,7 @@ for kl in "${KL_ARRAY[@]}"; do
 
     # --- Train ---------------------------------------------------------------
     begin_stage "train β=${kl}"
-    python scripts/train_with_early_stopping.py \
+    python "$EARLY_STOPPING_DIR/Python Files/train_with_early_stopping.py" \
         --parquet-path "$PARQUET" \
         --feature-spec-path "$UV_VAE_DIR/ml_features.json" \
         --output-dir "$kl_dir/training" \

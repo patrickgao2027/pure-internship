@@ -32,6 +32,7 @@
 set -euo pipefail
 
 UV_VAE_DIR="${UV_VAE_DIR:-$HOME/uv_vae}"
+EARLY_STOPPING_DIR="${EARLY_STOPPING_DIR:-$HOME/Early_Stopping_Tests}"
 COMBINED="${COMBINED:-/cta/users/patrickgao765/uv_vae/train_earlystop_1839691/combined.featuremap.parquet}"
 SWEEP_ROOT="${SWEEP_ROOT:-/cta/users/patrickgao765/uv_vae/sweep_${SLURM_JOB_ID:-manual}}"
 ROW_FILTER="${ROW_FILTER:-st = 'MIXED' AND et = 'MIXED' AND FILT = 1}"
@@ -71,7 +72,7 @@ run_p1() {
     local out_dir="$SWEEP_ROOT/$name"
     local t0=$SECONDS
     echo "[$(date '+%T')] P1 START  $name  batch=$batch  lr=$lr"
-    python scripts/train_with_early_stopping.py \
+    python "$EARLY_STOPPING_DIR/Python Files/train_with_early_stopping.py" \
         --parquet-path "$COMBINED" \
         --feature-spec-path "$UV_VAE_DIR/ml_features.json" \
         --output-dir "$out_dir" \
@@ -101,7 +102,7 @@ run_p2() {
     local out_dir="$SWEEP_ROOT/$name"
     local t0=$SECONDS
     echo "[$(date '+%T')] P2 START  $name  warmup=$warmup  (streaming, $P2_EPOCHS epochs)"
-    python scripts/train_with_early_stopping.py \
+    python "$EARLY_STOPPING_DIR/Python Files/train_with_early_stopping.py" \
         --parquet-path "$COMBINED" \
         --feature-spec-path "$UV_VAE_DIR/ml_features.json" \
         --output-dir "$out_dir" \

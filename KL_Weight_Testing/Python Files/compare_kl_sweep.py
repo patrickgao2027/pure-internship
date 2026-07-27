@@ -89,9 +89,16 @@ def load_diagnostics(run_dir: Path) -> list[dict[str, Any]]:
 
 
 def load_training_history(run_dir: Path) -> list[dict[str, Any]]:
-    """Per-epoch val_total_loss, train_total_loss from summary.json history."""
-    summary = load_summary(run_dir)
-    return (summary.get("early_stopping") or {}).get("history") or []
+    """Per-epoch val_total_loss / train_total_loss from the training report.
+
+    The per-epoch history lives in training_report.json (written by every trainer);
+    summary.json only carries the early-stopping report and the final epoch.
+    """
+    path = run_dir / "training" / "training_report.json"
+    if not path.exists():
+        return []
+    report = json.loads(path.read_text())
+    return report.get("history") or []
 
 
 def load_cluster_labels(run_dir: Path) -> np.ndarray | None:

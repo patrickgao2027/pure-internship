@@ -45,6 +45,7 @@ set -euo pipefail
 
 UV_VAE_DIR="${UV_VAE_DIR:-$HOME/uv_vae}"
 BATCH_LR_DIR="${BATCH_LR_DIR:-$HOME/Batch_Size_Learning_Rate_Testing}"
+EARLY_STOPPING_DIR="${EARLY_STOPPING_DIR:-$HOME/Early_Stopping_Tests}"
 COMBINED="${COMBINED:-/cta/users/patrickgao765/uv_vae/train_earlystop_1839691/combined.featuremap.parquet}"
 SWEEP_ROOT="${SWEEP_ROOT:-/cta/users/patrickgao765/uv_vae/sweep_gpu_${SLURM_ARRAY_JOB_ID:-manual}}"
 ROW_FILTER="${ROW_FILTER:-st = 'MIXED' AND et = 'MIXED' AND FILT = 1}"
@@ -148,7 +149,7 @@ echo ""
 echo "[$(date '+%F %T')] ===== BEGIN: train ====="
 TRAIN_START=$SECONDS
 
-python scripts/train_with_early_stopping.py \
+python "$EARLY_STOPPING_DIR/Python Files/train_with_early_stopping.py" \
     --parquet-path "$COMBINED" \
     --feature-spec-path "$UV_VAE_DIR/ml_features.json" \
     --output-dir "$CONFIG_DIR" \

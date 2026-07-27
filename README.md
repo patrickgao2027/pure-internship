@@ -131,23 +131,21 @@ Ideas for training full dataset
 3. Higher validation set so less data gets passed through -> 0.2 DONE
 4. Change to float16 on GPU   DONE
 5. Add cuML and cuDF libraries for zero code change acceleration DONE
-6. potentially add KL weight 
+6. potentially add KL weight -> DON'T ADD, I do not see the reasoning behind this and it is not used within ML benchmarking studies
 7. Look at active units 
 8. Procrustes distance again check if anything changes between epochs DONE
-9. KL shift 
+9. KL shift -> DON'T ADD, I do not see the reasoning behind this and it is not used within ML benchmarking studies
 10. Drop unimportant columns after training run and retrain -> check difference with procrustes, etc
 11. Tailor batch size
 12. Add something about latent dimension reduction participation ratio / covariance matrix 
-
-Additional Things to Test/ Create
-1. Get characteristics of the clusters
+13. Get characteristics of the clusters
 
 Files to transfer (5 files):
 
 uv_vae/uv_vae/streaming.py — cuDF + convergence integration  
 uv_vae/uv_vae/convergence.py — new convergence tracker module  
-uv_vae/scripts/train_with_early_stopping.py — --test-parquet-path + --convergence-rows args  
-uv_vae/scripts/run_train_only.sh — TEST_PARQUET env var  
+Early_Stopping_Tests/Python Files/train_with_early_stopping.py — --test-parquet-path + --convergence-rows args  
+Early_Stopping_Tests/scripts/run_train_only.sh — TEST_PARQUET env var  
 uv_vae/scripts/run_full_pipeline.sh — parameterized values + TEST_PARQUET  
 
 7/21 
@@ -160,3 +158,67 @@ Also add warm up for changed learning rate
 https://www.geeksforgeeks.org/machine-learning/how-to-choose-batch-size-and-number-of-epochs-when-fitting-a-model/  
 https://www.geeksforgeeks.org/deep-learning/how-should-the-learning-rate-change-as-the-batch-size-changes/  
 https://medium.com/mini-distill/effect-of-batch-size-on-training-dynamics-21c14f7a716e  
+
+7/22 + 7/24
+To Do: 
+1. Batch size limits for GPU NVME SSD GBs cap thing  
+3. Get characteristics of the clusters -> what else needs to be computed apart from what is seen in sigprofiler? 
+5.  Auto encoder instead of variational auto encoder 
+    a. https://www.ibm.com/think/topics/autoencoder 
+    b. https://medium.com/data-science/difference-between-autoencoder-ae-and-variational-autoencoder-vae-ed7be1c038f2   
+    c. https://arxiv.org/html/2604.22099v1#S4 alternatives to VAE
+6. Do full pipeline runs of what we already have -> check for rq filtering, full, and some subsamples...
+
+
+Done:
+1. Tailor specific batchsize, learning rate, and learning rate warmup for GPU training  
+    a. For batchsize, learning rate, and learning rate warmup have slurm scripts to test on GPU
+    b. only feasible for full dataset on GPU, with speed ups for batchsize, cuDF, cuML etc  
+2. Scripts for dropout and early stopping depending on val loss / active units
+4. Think of KL weight as trainable parameter -> give sweeps to see performance.  
+    a. Messes with disentanglement / entanglement of VAE encoding
+    b. Disentanglement is when one latent dimension captures one source of variation in the data, entanglement is when its a mesh together
+    c. Needs full pipeline runs which is computationally expensive
+    d. https://openreview.net/pdf?id=Sy2fzU9gl  
+    e. beta parameter is added to loss function in KL divergence, allows to choose between reconstruction and KL 
+1. Formulate why Active Units is so useful for detecting when latent space is learned
+    a. https://arxiv.org/pdf/1509.00519
+    b. measures activity of a latent dimension U through the statistic cov(E---)
+## VAE Theory  
+- True posterior p(z|x) is intractable → approximate with q_φ(z|x) = N(μ(x), σ²(x))
+- Encoder outputs μ and log σ² per latent dimension j — this is the variational assumption
+## ELBO  
+- Can't minimize KL(q‖p) directly → derive ELBO as tractable surrogate
+- L = E[log p(x|z)] - D_KL(q_φ(z|x) ‖ p(z))
+- Maximizing ELBO = better reconstruction + keeping q close to prior
+## KL Closed Form  
+- Choose prior p(z) = N(0,I) → off-diagonal covariance = 0 → dimensions independent
+- Closed form per dimension: KL_j = ½(μ² + σ² - log σ² - 1)
+- In code: -0.5 * sum(1 + log_var - mu² - exp(log_var))
+## Posterior Collapse & Active Units  
+- KL term pushes μ_j(x) → 0 for all x, collapsing the x conditioning
+- Active unit: Var_x[μ_j(x)] > ε → dimension responds to input
+- Dead unit: Var_x[μ_j(x)] ≈ 0 → KL won, dimension ignores x
+- Compute: all_mus.var(dim=0) → shape (latent_dim,), threshold at ε
+## Mitigations  
+- KL annealing: delay KL penalty early in training
+- Free bits: clamp per-dim KL to floor λ so optimizer can't zero it out
+7. KL Collapse
+    a. how to track https://arxiv.org/pdf/1911.02469
+    b. https://arxiv.org/abs/1804.03599 mean of KL term
+    c. https://arxiv.org/pdf/1911.02469 as a distribution percentage below threshold
+    d. https://www.emergentmind.com/topics/posterior-collapse
+
+Rejected:
+1. Add something about latent dimension reduction through participation ratio / covariance matrix -> could the covariance matrix reveal something about dimensions not being correlated / could be reduced  DONT DO
+2. Rank importance by KL divergence between each feature and the prior, larger KL divergence means more importance https://arxiv.org/abs/1804.03599  
+    A. NEW Direction -> NO need to use KL divergence method as method of feature selection
+3. Feature selection methods DONT NEED
+    a. https://academic.oup.com/bib/article/27/1/bbag006/8441040 review of specific unsupervised feature selection methods
+    b. PCA, ICA
+    c. Honestly after more thought, it doesn't seem as useful as intended.  
+    d. could be useful if we don't want autoencoder structure 
+
+
+
+
