@@ -3,13 +3,43 @@ data/
 TF Outputs/
 hpc scripts/
 logs/
+comparison_results/
+
+# ---------------------------------------------------------------------------
+# Run outputs. Code is versioned; results are not -- they are large, they are
+# regenerable, and they are per-machine.
+#
+# The 2026-07 folder reorganisation moved every sweep output under
+# Results_of_Sweeps/, which silently defeated the path-anchored rules below
+# (they only ever matched the OLD locations). That exposed ~114 MB of run
+# artifacts, including 168 model.pt files, to git. The Results_of_Sweeps rule is
+# what actually does the work now; the old paths are kept so anything restored
+# to its former location stays ignored too.
+# ---------------------------------------------------------------------------
+VAE_Stability_Testing/Results_of_Sweeps/
+
 VAE_Stability_Testing/epoch_sweep/
 VAE_Stability_Testing/seed_comparison/
 VAE_Stability_Testing/seed_density_sweep/
 VAE_Stability_Testing/seed_sweep_extended/
+VAE_Stability_Testing/sweep_results/
+VAE_Stability_Testing/sweep_results_1M/
+VAE_Stability_Testing/sweep_results_10M/
 VAE_Stability_Testing/sweep_results_c1/
 VAE_Stability_Testing/sweep_results_full/
 VAE_Stability_Testing/sweep_seed_results/
 VAE_Stability_Testing/vs_52M_comparison/
 VAE_Stability_Testing/rq_sweep/
-comparison_results/
+
+# End-to-end pipeline runs. These are far too big for GitHub -- the 20260709
+# run alone holds a 111.9 MB parquet and a 110.0 MB umap pickle, both over
+# GitHub's hard 100 MB per-file limit, so a push containing them is rejected.
+train_then_cluster_*/
+clust_regime_sweep/*.log
+clust_regime_sweep/*.err
+
+# Sweep and run roots the tmux runners create (see TMUX_RUNNERS.md).
+sweeps/
+runs/
+uv_vae/sweeps/
+uv_vae/runs/
