@@ -61,6 +61,18 @@ HDBSCAN → SigProfiler**. The default row filter everywhere is
   training with flat memory. `StreamingParquetDataset` (IterableDataset, windowed shuffle,
   deterministic `row_index % val_denominator` split), `TabularVAEWithDropout`, AMP, LR warmup,
   optional cuDF/cuPy GPU encode path.
+- `multi_parquet.py` — additive reader for the **95-file** case: one reader per parquet,
+  every batch drawn from all of them in proportion to each file's post-filter row count
+  (largest-remainder allocation), each file read in **shuffled row-group order** to destroy
+  the genomic clustering (the files are sorted by `CHROM,POS` with ~88% of adjacent rows at
+  the same locus). Supports epoch sharding. No torch import, so it is testable standalone.
+- `splitting.py` — content-hash train/val predicates (SplitMix64, constants pinned locally).
+  Replaces the positional split, which cannot survive interleaved reading. Default
+  `per_sample_site_hash` keeps every read at a locus on one side.
+- `stats_cache.py` — per-file row counts + normalisation statistics in one scan, cached on
+  disk, combined across files with Chan–Golub–LeVeque as a balanced tree.
+- `multi_streaming.py` — the trainer for the interleaved reader. Imports `_run_training_epoch`,
+  `run_val_epoch_with_diagnostics` and `_build_model` from `streaming.py`; adds no maths.
 - `convergence.py` — `ConvergenceTracker`: encodes a fixed test set each epoch and compares
   consecutive epochs via Procrustes / linear CKA / trustworthiness.
 - `latent_metrics.py` — post-hoc `evaluate_checkpoint()`: activation quality (active units,
@@ -85,9 +97,22 @@ clustering pipeline consume any run unchanged. **Preserve this contract when edi
 | Sampled | `training.train` | reservoir-sample N rows into RAM | stability sweeps, quick runs |
 | All-in-RAM | `early_stopping.train_with_early_stopping` | all filtered rows into RAM | mid-size, wants diagnostics |
 | Streaming | `streaming.train_with_early_stopping_streaming` | streamed from parquet, flat memory | full dataset / OOM-safe |
+| Interleaved | `multi_streaming.train_interleaved` | many per-sample parquets at once | the 95-file cohort |
 
-`Early_Stopping_Tests/Python Files/train_with_early_stopping.py` is the unified CLI: `--streaming`
-selects the streaming trainer, otherwise `--use-all` vs `--sample-rows` picks the other two.
+`Early_Stopping_Tests/Python Files/train_with_early_stopping.py` is the unified CLI:
+`--parquet-paths` (globs accepted) selects the interleaved trainer; otherwise `--parquet-path`
+plus `--streaming`, `--use-all` or `--sample-rows` picks one of the other three.
+`--parquet-paths` is *refused* alongside those three rather than silently ignoring them.
+
+**Multi-file loading** is documented in `MULTI_PARQUET_LOADING.md` (what was built, what was
+measured, what is still unverified); `SAMPLING_STRATEGY.md` is the decision record for why the
+other six strategies were rejected and holds the still-open advisor questions. Run the
+statistics preflight before the first cohort run — it is cheap and its cache is reused:
+
+```bash
+PARQUET_GLOB='/cta/users/patrickgao765/parquet_files/*.featuremap.parquet' \
+    STATS_ONLY=1 bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
+```
 
 ### How the experiment folders find the core package
 

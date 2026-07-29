@@ -45,6 +45,9 @@ from uv_vae.early_stopping import (
     EarlyStoppingConfig,
     train_with_early_stopping,
 )
+from uv_vae.multi_parquet import DEFAULT_SHUFFLE_BUFFER_ROWS
+from uv_vae.multi_streaming import DEFAULT_VAL_MAX_ROWS
+from uv_vae.splitting import GLOBAL_SITE_HASH, STRATEGIES
 from uv_vae.train_cli import resolve_requested_sample_rows, resolve_training_sample_rows
 from uv_vae.training import (
     DEFAULT_TRAINING_FEATURE_SPEC_PATH,
@@ -56,10 +59,21 @@ from uv_vae.training import (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train the VAE with early stopping")
-    parser.add_argument(
+    source_group = parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument(
         "--parquet-path",
-        required=True,
-        help="Path to the parquet feature map (no default: always pass this explicitly)",
+        help="Path to a single parquet feature map (no default: always pass this explicitly)",
+    )
+    source_group.add_argument(
+        "--parquet-paths",
+        nargs="+",
+        metavar="PATH_OR_GLOB",
+        help="Two or more per-sample parquet feature maps, or a glob matching them. "
+        "Selects the interleaved multi-file trainer: every batch contains every "
+        "sample in proportion to its share of the total filtered rows, and each "
+        "file is read in shuffled row-group order so a batch is not one genomic "
+        "window. Implies streaming; incompatible with --streaming/--use-all/"
+        "--sample-rows.",
     )
     parser.add_argument("--feature-spec-path", default=DEFAULT_TRAINING_FEATURE_SPEC_PATH)
     parser.add_argument("--output-dir", default="artifacts")
@@ -155,7 +169,81 @@ def parse_args() -> argparse.Namespace:
         help="Steps to linearly ramp lr from ~0 to target. Streaming only. "
         "Recommended when lr > 1e-3 or batch_size > 65536.",
     )
-    return parser.parse_args()
+
+    multi = parser.add_argument_group(
+        "multi-file interleaving", "Ignored unless --parquet-paths is given."
+    )
+    multi.add_argument(
+        "--split-strategy",
+        default=GLOBAL_SITE_HASH,
+        choices=list(STRATEGIES),
+        help="How to assign rows to train/val. global_site_hash puts a locus on the "
+        "same side in EVERY sample -- the only clean holdout across a cohort of "
+        "human genomes that share loci. per_sample_site_hash keeps a locus intact "
+        "within a sample but still leaks across samples. per_sample_row_hash is "
+        "cheapest (no CHROM/POS read) but leaks at the locus level and makes early "
+        "stopping fire late. Default: %(default)s.",
+    )
+    multi.add_argument(
+        "--val-fraction",
+        type=float,
+        default=None,
+        help="Validation share for the interleaved trainer. Defaults to "
+        "1 - --train-fraction.",
+    )
+    multi.add_argument(
+        "--epoch-shards",
+        type=int,
+        default=1,
+        help="Split each file's row groups into E disjoint strata and give epoch e "
+        "stratum e. Every row is then seen exactly once per E epochs, each epoch "
+        "costs 1/E of a pass, and each epoch is still a proportional mix of all "
+        "samples. E=20 makes a full pass over ~4.75B rows cost 20 epochs.",
+    )
+    multi.add_argument(
+        "--stats-cache-path",
+        default=None,
+        help="JSON file for per-file row counts and normalisation statistics. "
+        "Statistics are cached per file, so adding a sample later costs one scan "
+        "rather than rescanning everything.",
+    )
+    multi.add_argument(
+        "--shuffle-buffer-rows",
+        type=int,
+        default=DEFAULT_SHUFFLE_BUFFER_ROWS,
+        help="Post-filter rows each reader holds decoded and shuffled at once. "
+        "Costs ~320 B/row per sample. Default: %(default)s.",
+    )
+    multi.add_argument(
+        "--val-max-rows",
+        type=int,
+        default=DEFAULT_VAL_MAX_ROWS,
+        help="Cap on validation rows read per epoch (0 = uncapped). A site-keyed "
+        "split scatters validation rows through every row group, so an uncapped "
+        "validation pass touches the whole dataset and costs more than a sharded "
+        "training epoch. Default: %(default)s.",
+    )
+
+    args = parser.parse_args()
+
+    # argparse cannot express "mutually exclusive with a whole other group", and
+    # silently ignoring a flag the user passed is worse than refusing to start.
+    if args.parquet_paths:
+        conflicts = [
+            name
+            for name, value in (
+                ("--streaming", args.streaming),
+                ("--use-all", args.use_all),
+                ("--sample-rows", args.sample_rows is not None),
+            )
+            if value
+        ]
+        if conflicts:
+            parser.error(
+                f"--parquet-paths already implies streaming and cannot be combined "
+                f"with {', '.join(conflicts)}"
+            )
+    return args
 
 
 def main() -> int:
@@ -167,6 +255,82 @@ def main() -> int:
         active_unit_threshold=args.active_unit_threshold,
         kl_collapse_threshold=args.kl_collapse_threshold,
     )
+
+    if args.parquet_paths:
+        from uv_vae.multi_streaming import resolve_parquet_paths, train_interleaved
+        from uv_vae.splitting import SplitConfig
+
+        parquet_paths = resolve_parquet_paths(args.parquet_paths)
+        val_fraction = (
+            args.val_fraction
+            if args.val_fraction is not None
+            else round(1.0 - args.train_fraction, 10)
+        )
+        split_config = SplitConfig(
+            strategy=args.split_strategy, val_fraction=val_fraction, seed=args.seed
+        )
+        print(
+            f"Interleaving {len(parquet_paths)} parquet files "
+            f"(split={split_config.strategy}, val_fraction={split_config.val_fraction}, "
+            f"epoch_shards={args.epoch_shards})",
+            file=sys.stderr,
+            flush=True,
+        )
+
+        config = TrainingConfig(
+            # TrainingConfig is deliberately not modified: it carries a single
+            # parquet_path, and inference.py reads that field as a fallback when no
+            # parquet is passed explicitly. Setting it to the first sample keeps
+            # that fallback resolvable; the full list is recorded under
+            # parquet_paths in every report.
+            parquet_path=parquet_paths[0],
+            feature_spec_path=args.feature_spec_path,
+            output_dir=args.output_dir,
+            row_filter=args.row_filter,
+            sample_rows=0,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            latent_dim=args.latent_dim,
+            hidden_dims=[int(part) for part in args.hidden_dims.split(",") if part],
+            learning_rate=args.learning_rate,
+            kl_weight=args.kl_weight,
+            train_fraction=args.train_fraction,
+            seed=args.seed,
+            threads=args.threads,
+        )
+        run_dir = train_interleaved(
+            config,
+            parquet_paths=parquet_paths,
+            early_stopping=early_stopping_config,
+            split_config=split_config,
+            epoch_shards=args.epoch_shards,
+            stats_cache_path=args.stats_cache_path,
+            shuffle_buffer_rows=args.shuffle_buffer_rows,
+            val_max_rows=args.val_max_rows,
+            input_dropout=args.input_dropout,
+            hidden_dropout=args.hidden_dropout,
+            test_parquet_path=args.test_parquet_path,
+            convergence_rows=args.convergence_rows,
+            warmup_steps=args.warmup_steps,
+        )
+        summary = json.loads((run_dir / "summary.json").read_text())
+        print(
+            json.dumps(
+                {
+                    "run_dir": str(run_dir),
+                    "checkpoint_path": str(run_dir / "model.pt"),
+                    "eligible_rows": summary.get("eligible_rows_in_parquet", 0),
+                    "sample_count": summary.get("sample_count", 0),
+                    "interleaved": True,
+                    "row_filter": args.row_filter,
+                    "sampling": summary.get("sampling", {}),
+                    "early_stopping": summary.get("early_stopping", {}),
+                    "final_epoch": summary.get("final_epoch", {}),
+                },
+                indent=2,
+            )
+        )
+        return 0
 
     if args.streaming:
         from uv_vae.streaming import train_with_early_stopping_streaming

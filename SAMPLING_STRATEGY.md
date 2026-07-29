@@ -1,5 +1,7 @@
 # Training the VAE on all 95 per-sample parquets
 
+> **Superseded in part.** The strategy selected here (proportional interleave + row-group shuffling) has been implemented and tested. See `MULTI_PARQUET_LOADING.md` for what was actually built, measured, and what remains unverified.
+
 **Status of the numbers below.** Figures marked *(verified)* were read directly out of
 the code in this repository. Figures marked *(estimated)* are arithmetic from those
 constants and have **not** been measured against the real 95-file dataset — in
