@@ -84,6 +84,20 @@ main() {
     export UV_VAE_GPU_MEM_GB="$UVV_GPU_PER_WORKER"
     local threads="$UVV_THREADS_PER_WORKER"
 
+    # The interleaved reader decodes with pyarrow + polars on the CPU, so nothing
+    # in this process allocates from RMM and torch should get the whole budget.
+    # train_interleaved already defaults to this on its own; setting it here as
+    # well is what makes the batch ceiling printed below agree with what the run
+    # actually gets, instead of quoting a ceiling 25% low. cuML in-process is the
+    # one case that still needs a bounded pool -- unbounded, it grows toward all
+    # free memory and the torch cap buys nothing.
+    if [ "${UV_VAE_ENABLE_CUML:-0}" = "1" ]; then
+        UV_VAE_RMM_SHARE="${UV_VAE_RMM_SHARE:-0.25}"
+    else
+        UV_VAE_RMM_SHARE="${UV_VAE_RMM_SHARE:-0}"
+    fi
+    export UV_VAE_RMM_SHARE
+
     mkdir -p "$RUN_ROOT" "$LOG_DIR"
 
     local n_files
@@ -229,6 +243,7 @@ else
         UV_VAE_DIR EARLY_STOPPING_DIR CONDA_ENV MAMBA_ENV MAMBA_ROOT_PREFIX \
         RUN_ID RUN_ROOT PARQUET_GLOB STATS_CACHE STATS_ONLY ROW_FILTER SEED \
         GPU_TOTAL_GB THREADS_TOTAL UV_VAE_GPU_OOM_POLICY \
+        UV_VAE_RMM_SHARE UV_VAE_ENABLE_CUML \
         BATCH_SIZE EPOCH_CEILING EPOCH_SHARDS PATIENCE MIN_DELTA AU_THRESHOLD \
         INPUT_DROPOUT HIDDEN_DROPOUT LATENT_DIM HIDDEN_DIMS LEARNING_RATE \
         KL_WEIGHT TRAIN_FRACTION VAL_FRACTION SPLIT_STRATEGY \
