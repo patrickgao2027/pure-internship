@@ -66,8 +66,9 @@ CONVERGENCE_ROWS="${CONVERGENCE_ROWS:-5000}"
 
 LOG_DIR="$RUN_ROOT/logs"
 
-main() {
+_main_inner() {
     uvv_activate_env
+    uvv_log_provenance
     uvv_export_determinism "$SEED"
     # One run, so the whole budget goes to it.
     uvv_plan_resources 1
@@ -88,14 +89,27 @@ main() {
     echo "  seed        : $SEED"
     uvv_rule
 
+    # The parquet may not exist yet (it is combined from SAMPLE_1/SAMPLE_2 below),
+    # in which case the shape comes from the spec alone -- pessimistic, not wrong.
+    local shape_parquet=""
+    local shape_args=()
+    if [ -f "$COMBINED" ] || compgen -G "$COMBINED" > /dev/null; then
+        shape_parquet="$COMBINED"
+        # An array, not ${x:+...}: ROW_FILTER contains spaces and would word-split.
+        shape_args=(--parquet-path "$COMBINED" --row-filter "$ROW_FILTER")
+    fi
+
     echo "GPU budget check:"
-    uvv_report_batch_ceiling "$UVV_GPU_PER_WORKER" "$BATCH_SIZE"
+    UVV_SHAPE_PARQUET="$shape_parquet" UVV_SHAPE_FILTER="$ROW_FILTER" \
+        uvv_report_batch_ceiling "$UVV_GPU_PER_WORKER" "$BATCH_SIZE"
     echo
 
     if [ "${SKIP_PREFLIGHT:-0}" != "1" ]; then
         python "$UV_VAE_DIR/scripts/gpu_preflight.py" \
             --batch-size "$BATCH_SIZE" \
             --budget-gb "$UVV_GPU_PER_WORKER" \
+            --feature-spec-path "$UV_VAE_DIR/ml_features.json" \
+            ${shape_args[@]+"${shape_args[@]}"} \
             --json-out "$RUN_ROOT/gpu_preflight.json" \
             || { echo "Preflight failed. Fix the FAIL lines above, or set SKIP_PREFLIGHT=1 to override." >&2; exit 1; }
         echo
@@ -169,6 +183,11 @@ PY
     echo "  epoch diagnostics: $RUN_ROOT/training/*/diagnostics_report.json"
     echo "  GPU cap recorded : $RUN_ROOT/training/*/training_report.json  (key: gpu_budget)"
     uvv_rule
+    uvv_collect_errors "$LOG_DIR"
+}
+
+main() {
+    uvv_run_main "$LOG_DIR" _main_inner
 }
 
 if [ "${UVV_CHILD:-0}" = "1" ] || [ "${FOREGROUND:-0}" = "1" ] || [ "${DRY_RUN:-0}" = "1" ]; then

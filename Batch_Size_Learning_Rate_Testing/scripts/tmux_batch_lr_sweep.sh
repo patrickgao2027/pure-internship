@@ -165,8 +165,9 @@ run_task() {
 }
 
 # ── Driver ──────────────────────────────────────────────────────────────────
-main() {
+_main_inner() {
     uvv_activate_env
+    uvv_log_provenance
     uvv_export_determinism "$SEED"
     uvv_plan_resources "$CONCURRENCY"
 
@@ -196,7 +197,8 @@ main() {
         queued_batches+=("${ALL_BATCHES[$task]}")
     done
     echo "GPU budget check:"
-    uvv_report_batch_ceiling "$UVV_GPU_PER_WORKER" "${queued_batches[@]}"
+    UVV_SHAPE_PARQUET="$COMBINED" UVV_SHAPE_FILTER="$ROW_FILTER" \
+        uvv_report_batch_ceiling "$UVV_GPU_PER_WORKER" "${queued_batches[@]}"
     echo
 
     if [ "${SKIP_PREFLIGHT:-0}" != "1" ]; then
@@ -204,6 +206,9 @@ main() {
         python "$UV_VAE_DIR/scripts/gpu_preflight.py" \
             --batch-size "$(printf '%s\n' "${queued_batches[@]}" | sort -n | tail -1)" \
             --budget-gb "$UVV_GPU_PER_WORKER" \
+            --feature-spec-path "$UV_VAE_DIR/ml_features.json" \
+            --parquet-path "$COMBINED" \
+            --row-filter "$ROW_FILTER" \
             --json-out "$SWEEP_ROOT/gpu_preflight.json" \
             || { echo "Preflight failed. Fix the FAIL lines above, or set SKIP_PREFLIGHT=1 to override." >&2; exit 1; }
         echo
@@ -226,6 +231,11 @@ main() {
     echo "  epoch history : $SWEEP_ROOT/*/*/training_report.json"
     echo "  latent metrics: $SWEEP_ROOT/*/*_eval.json"
     uvv_rule
+    uvv_collect_errors "$LOG_DIR"
+}
+
+main() {
+    uvv_run_main "$LOG_DIR" _main_inner
 }
 
 if [ "${UVV_CHILD:-0}" = "1" ] || [ "${FOREGROUND:-0}" = "1" ] || [ "${DRY_RUN:-0}" = "1" ]; then
