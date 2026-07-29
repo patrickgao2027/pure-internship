@@ -43,3 +43,22 @@ sweeps/
 runs/
 uv_vae/sweeps/
 uv_vae/runs/
+
+# ---------------------------------------------------------------------------
+# Data inputs and binary artifacts. These had NO rule until 2026-07-29, and
+# parquet_files/ (11.7 GB in two featuremaps) was merely *untracked* -- which is
+# not the same as ignored. A single `git add -A` from the repo root was enough to
+# write multi-GB blobs into .git/objects, and unstaging does not remove them:
+# 3.1 GB of dangling parquet blobs had to be pruned to reclaim the space.
+#
+# Note that ignoring only stops future wildcard adds. It does not protect
+# .git/objects from `git add -f`, and it never removes blobs already written.
+# ---------------------------------------------------------------------------
+parquet_files/
+*.parquet
+*.tar
+
+# Model checkpoints and encoded caches -- regenerable, and large enough to blow
+# past GitHub's 100 MB per-file limit.
+*.pt
+*.npy
