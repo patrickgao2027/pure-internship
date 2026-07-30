@@ -184,6 +184,7 @@ main() {
         python "$UV_VAE_DIR/scripts/gpu_preflight.py" \
             --batch-size "$BATCH_SIZE" \
             --budget-gb "$UVV_GPU_PER_WORKER" \
+            --feature-spec-path "$UV_VAE_DIR/ml_features.json" \
             --json-out "$RUN_ROOT/gpu_preflight.json" \
             || { echo "Preflight failed. Fix the FAIL lines above, or set SKIP_PREFLIGHT=1 to override." >&2; exit 1; }
         echo
