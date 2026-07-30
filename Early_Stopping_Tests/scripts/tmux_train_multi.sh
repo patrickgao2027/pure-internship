@@ -119,7 +119,11 @@ main() {
     # actually gets, instead of quoting a ceiling 25% low. cuML in-process is the
     # one case that still needs a bounded pool -- unbounded, it grows toward all
     # free memory and the torch cap buys nothing.
-    if [ "${UV_VAE_ENABLE_CUML:-0}" = "1" ]; then
+    # UV_VAE_GPU_DECODE=1 makes the reader itself use cuDF, so the "nothing here
+    # allocates from RMM" premise stops holding and the pool has to be bounded
+    # rather than zeroed -- zeroing would not disable cuDF, it would let cuDF
+    # allocate outside the budget.
+    if [ "${UV_VAE_ENABLE_CUML:-0}" = "1" ] || [ "${UV_VAE_GPU_DECODE:-0}" = "1" ]; then
         UV_VAE_RMM_SHARE="${UV_VAE_RMM_SHARE:-0.25}"
     else
         UV_VAE_RMM_SHARE="${UV_VAE_RMM_SHARE:-0}"
@@ -272,7 +276,7 @@ else
         UV_VAE_DIR EARLY_STOPPING_DIR CONDA_ENV MAMBA_ENV MAMBA_ROOT_PREFIX \
         RUN_ID RUN_ROOT PARQUET_GLOB STATS_CACHE STATS_ONLY ROW_FILTER SEED \
         GPU_TOTAL_GB THREADS_TOTAL UV_VAE_GPU_OOM_POLICY \
-        UV_VAE_RMM_SHARE UV_VAE_ENABLE_CUML \
+        UV_VAE_RMM_SHARE UV_VAE_ENABLE_CUML UV_VAE_GPU_DECODE \
         BATCH_SIZE EPOCH_CEILING EPOCH_SHARDS PATIENCE MIN_DELTA AU_THRESHOLD \
         INPUT_DROPOUT HIDDEN_DROPOUT LATENT_DIM HIDDEN_DIMS LEARNING_RATE \
         KL_WEIGHT TRAIN_FRACTION VAL_FRACTION SPLIT_STRATEGY \
