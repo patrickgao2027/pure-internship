@@ -110,9 +110,12 @@ other six strategies were rejected and holds the still-open advisor questions. R
 statistics preflight before the first cohort run — it is cheap and its cache is reused:
 
 ```bash
-PARQUET_GLOB='/cta/users/patrickgao765/parquet_files/*.featuremap.parquet' \
-    STATS_ONLY=1 bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
+STATS_ONLY=1 bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
 ```
+
+`PARQUET_GLOB` defaults to the cohort folder of whichever cluster it detects, so
+it normally needs no value; set it to run on a subset
+(`PARQUET_GLOB='/data/lab/ppmseq_parquets/wt*.parquet'`).
 
 ### How the experiment folders find the core package
 
@@ -178,7 +181,11 @@ Most runs are configured through **environment variables** consumed by the shell
 - Env activation in every `.sh` is manager-agnostic: `CONDA_ENV` wins if set, else
   micromamba `${MAMBA_ENV:-uv_vae}` if the binary exists, else conda `patrickg`. One
   script therefore runs on either cluster unedited.
-- Parquet data under `/cta/users/patrickgao765/parquet_files/`.
+- Parquet data: the 95-sample cohort lives at `/data/lab/ppmseq_parquets/` on **miletus**
+  (shared lab folder, treat as read-only) and at `/cta/users/patrickgao765/parquet_files/`
+  on **tosun**. `tmux_train_multi.sh` picks whichever exists.
+- On miletus the repo is a git clone at `$HOME/pure-internship` (so
+  `$HOME/pure-internship/uv_vae`), not the `$HOME/uv_vae` sibling layout tosun uses.
 - Scripts are edited on Windows, so strip CRLF before submitting: `sed -i 's/\r$//' <script>.sh`.
 - Set `export TQDM_DISABLE=1` for non-interactive jobs.
 - `import matplotlib.pyplot` is deferred inside plotting functions (matplotlib can crash on HPC

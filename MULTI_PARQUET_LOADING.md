@@ -314,13 +314,13 @@ make impossible to predict from `val_fraction` alone. The cache it writes is
 reused by every later run:
 
 ```bash
-PARQUET_GLOB='/cta/users/patrickgao765/parquet_files/*.featuremap.parquet' STATS_ONLY=1 bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
+STATS_ONLY=1 bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
 ```
 
 Stage 2 — train:
 
 ```bash
-PARQUET_GLOB='/cta/users/patrickgao765/parquet_files/*.featuremap.parquet' EPOCH_SHARDS=20 EPOCH_CEILING=40 PATIENCE=8 bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
+EPOCH_SHARDS=20 EPOCH_CEILING=40 PATIENCE=8 bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
 ```
 
 Or the CLI directly:

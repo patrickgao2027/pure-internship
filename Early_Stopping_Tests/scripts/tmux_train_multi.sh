@@ -16,20 +16,36 @@
 # parse, the row filter behaves, and no sample is starved -- and the cache it
 # writes is reused by every later run, so it is not throwaway work:
 #
-#     PARQUET_GLOB='/cta/users/patrickgao765/parquet_files/*.featuremap.parquet' \
 #     STATS_ONLY=1 bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
+#
+# PARQUET_GLOB defaults to the cohort folder for whichever cluster it finds
+# (miletus /data/lab/ppmseq_parquets, else tosun), so it usually needs no value.
+# Override it to run on a subset:
+#
+#     PARQUET_GLOB='/data/lab/ppmseq_parquets/wt*.parquet' STATS_ONLY=1 \
+#     bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
 #
 # Then drop STATS_ONLY to train. EPOCH_SHARDS=20 makes one full pass over every
 # row cost 20 epochs instead of one, so a run that early-stops around epoch 15-20
 # costs roughly what a single naive epoch would.
 #
-#     PARQUET_GLOB='...' EPOCH_SHARDS=20 EPOCH_CEILING=40 PATIENCE=8 \
+#     EPOCH_SHARDS=20 EPOCH_CEILING=40 PATIENCE=8 \
 #     bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
 #
 # Windows edit note:  sed -i 's/\r$//' Early_Stopping_Tests/scripts/tmux_train_multi.sh
 
 set -euo pipefail
 
+# Repo layout differs by cluster: on miletus the branch is a git clone at
+# ~/pure-internship, on tosun the folders are deployed as siblings in $HOME.
+# Probe rather than hardcode so one script serves both; an explicit export
+# still wins over either.
+if [ -z "${UV_VAE_DIR:-}" ] && [ -d "$HOME/pure-internship/uv_vae" ]; then
+    UV_VAE_DIR="$HOME/pure-internship/uv_vae"
+fi
+if [ -z "${EARLY_STOPPING_DIR:-}" ] && [ -d "$HOME/pure-internship/Early_Stopping_Tests" ]; then
+    EARLY_STOPPING_DIR="$HOME/pure-internship/Early_Stopping_Tests"
+fi
 UV_VAE_DIR="${UV_VAE_DIR:-$HOME/uv_vae}"
 EARLY_STOPPING_DIR="${EARLY_STOPPING_DIR:-$HOME/Early_Stopping_Tests}"
 
@@ -43,7 +59,19 @@ ROW_FILTER="${ROW_FILTER:-st = 'MIXED' AND et = 'MIXED' AND FILT = 1}"
 SEED="${SEED:-42}"
 SESSION="${SESSION:-train_multi}"
 
-PARQUET_GLOB="${PARQUET_GLOB:-/cta/users/patrickgao765/parquet_files/*.featuremap.parquet}"
+# Cohort location is cluster-specific: miletus keeps it in a shared lab folder,
+# tosun under the user's scratch. Take the first that exists. The miletus folder
+# is shared lab data and may be read-only -- nothing here writes to it, and the
+# stats cache deliberately lands under $UV_VAE_DIR (home) instead.
+if [ -z "${PARQUET_GLOB:-}" ]; then
+    for _dir in /data/lab/ppmseq_parquets /cta/users/patrickgao765/parquet_files; do
+        if [ -d "$_dir" ]; then
+            PARQUET_GLOB="$_dir/*.featuremap.parquet"
+            break
+        fi
+    done
+fi
+PARQUET_GLOB="${PARQUET_GLOB:-/data/lab/ppmseq_parquets/*.featuremap.parquet}"
 # Survives runs, so a re-run and a later 96th sample both cost one scan, not 95.
 STATS_CACHE="${STATS_CACHE:-$UV_VAE_DIR/stats_cache.json}"
 STATS_ONLY="${STATS_ONLY:-0}"
