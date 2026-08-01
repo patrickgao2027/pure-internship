@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
+from joblib import Memory
 
 import hdbscan
 
@@ -60,6 +61,12 @@ def hdbscan_grid(
     best: ClusteringResult | None = None
     best_key: tuple | None = None
 
+    # Built once, outside the loop, so every grid point shares one cache -- that sharing is
+    # what makes the MST reuse work. hdbscan calls memory.cache(...) unconditionally, so
+    # cache_dir=None cannot be forwarded as-is; Memory(None) is the library's own default
+    # and is the no-op cache, which turns the grid into an honest (if slower) re-fit.
+    memory = Memory(cache_dir, verbose=0) if cache_dir else Memory(None, verbose=0)
+
     for min_cluster_size in min_cluster_sizes:
         clusterer = hdbscan.HDBSCAN(
             min_cluster_size=int(min_cluster_size),
@@ -68,7 +75,7 @@ def hdbscan_grid(
             cluster_selection_method="eom",
             core_dist_n_jobs=int(core_dist_n_jobs),
             gen_min_span_tree=bool(gen_min_span_tree),
-            memory=cache_dir,  # shared cache => MST/core-dist computed once across the grid
+            memory=memory,  # shared cache => MST/core-dist computed once across the grid
             prediction_data=False,
         )
         clusterer.fit(X)
