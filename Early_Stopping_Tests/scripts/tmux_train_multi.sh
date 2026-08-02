@@ -91,6 +91,7 @@ KL_WEIGHT="${KL_WEIGHT:-0.05}"
 TRAIN_FRACTION="${TRAIN_FRACTION:-0.9}"
 SPLIT_STRATEGY="${SPLIT_STRATEGY:-global_site_hash}"
 SHUFFLE_BUFFER_ROWS="${SHUFFLE_BUFFER_ROWS:-32768}"
+DECODE_WORKERS="${DECODE_WORKERS:-1}"
 VAL_MAX_ROWS="${VAL_MAX_ROWS:-5000000}"
 WARMUP_STEPS="${WARMUP_STEPS:-0}"
 TEST_PARQUET="${TEST_PARQUET:-}"
@@ -143,6 +144,7 @@ main() {
     echo "  row filter  : $ROW_FILTER"
     echo "  split       : $SPLIT_STRATEGY  val_fraction=$VAL_FRACTION"
     echo "  batch       : $BATCH_SIZE   lr: $LEARNING_RATE   beta: $KL_WEIGHT"
+    echo "  decode      : $DECODE_WORKERS worker(s)"
     echo "  epochs      : $EPOCH_CEILING (patience=$PATIENCE, shards=$EPOCH_SHARDS)"
     echo "  GPU budget  : ${UV_VAE_GPU_MEM_GB} GB    threads: $threads"
     echo "  seed        : $SEED"
@@ -208,6 +210,7 @@ main() {
         --epoch-shards "$EPOCH_SHARDS" \
         --stats-cache-path "$STATS_CACHE" \
         --shuffle-buffer-rows "$SHUFFLE_BUFFER_ROWS" \
+        --decode-workers "$DECODE_WORKERS" \
         --val-max-rows "$VAL_MAX_ROWS" \
         --epochs "$EPOCH_CEILING" \
         --patience "$PATIENCE" \
