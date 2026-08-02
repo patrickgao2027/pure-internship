@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 import hdbscan
+from joblib import Memory as JoblibMemory
 
 
 def _noise_fraction(labels: np.ndarray) -> float:
@@ -60,6 +61,7 @@ def hdbscan_grid(
     best: ClusteringResult | None = None
     best_key: tuple | None = None
 
+    _memory = JoblibMemory(cache_dir, verbose=0) if cache_dir else JoblibMemory(None, verbose=0)
     for min_cluster_size in min_cluster_sizes:
         clusterer = hdbscan.HDBSCAN(
             min_cluster_size=int(min_cluster_size),
@@ -68,7 +70,7 @@ def hdbscan_grid(
             cluster_selection_method="eom",
             core_dist_n_jobs=int(core_dist_n_jobs),
             gen_min_span_tree=bool(gen_min_span_tree),
-            memory=cache_dir,  # shared cache => MST/core-dist computed once across the grid
+            memory=_memory,  # shared cache => MST/core-dist computed once across the grid
             prediction_data=False,
         )
         clusterer.fit(X)
