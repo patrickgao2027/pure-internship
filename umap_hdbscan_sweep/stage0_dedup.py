@@ -14,9 +14,9 @@ This module fixes both:
   the size. The files are sorted by ``(CHROM, POS)``, so the row-group statistics prune
   almost perfectly and each pass reads only its own chromosome's row groups.
 
-The ranking that picks the surviving row per locus is copied verbatim from
-``write_deduplicated_sample`` (SNVQ, QUAL, MAPQ, DP, RAW_VAF, then a stable tie-break) so
-the output is directly comparable with every earlier clustering run.
+The ranking that picks the surviving row per locus: QUAL, MAPQ, DP, RAW_VAF DESC, then a
+stable tie-break on available columns. SNVQ is excluded because it is a derived score that
+conflates multiple quality signals already captured individually by the other columns.
 
 ``locus_reads`` -- how many reads collapsed into each surviving row -- is computed in the
 same window pass. It costs nothing extra and is what lets stage 3 report read-weighted
@@ -124,7 +124,6 @@ def dedup_one_chromosome(
                     ROW_NUMBER() OVER (
                         PARTITION BY "CHROM", "POS", "REF", "ALT"
                         ORDER BY
-                            "SNVQ" DESC NULLS LAST,
                             "QUAL" DESC NULLS LAST,
                             "MAPQ" DESC NULLS LAST,
                             "DP" DESC NULLS LAST,
