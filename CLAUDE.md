@@ -61,6 +61,18 @@ HDBSCAN → SigProfiler**. The default row filter everywhere is
   training with flat memory. `StreamingParquetDataset` (IterableDataset, windowed shuffle,
   deterministic `row_index % val_denominator` split), `TabularVAEWithDropout`, AMP, LR warmup,
   optional cuDF/cuPy GPU encode path.
+- `multi_parquet.py` — additive reader for the **95-file** case: one reader per parquet,
+  every batch drawn from all of them in proportion to each file's post-filter row count
+  (largest-remainder allocation), each file read in **shuffled row-group order** to destroy
+  the genomic clustering (the files are sorted by `CHROM,POS` with ~88% of adjacent rows at
+  the same locus). Supports epoch sharding. No torch import, so it is testable standalone.
+- `splitting.py` — content-hash train/val predicates (SplitMix64, constants pinned locally).
+  Replaces the positional split, which cannot survive interleaved reading. Default
+  `per_sample_site_hash` keeps every read at a locus on one side.
+- `stats_cache.py` — per-file row counts + normalisation statistics in one scan, cached on
+  disk, combined across files with Chan–Golub–LeVeque as a balanced tree.
+- `multi_streaming.py` — the trainer for the interleaved reader. Imports `_run_training_epoch`,
+  `run_val_epoch_with_diagnostics` and `_build_model` from `streaming.py`; adds no maths.
 - `convergence.py` — `ConvergenceTracker`: encodes a fixed test set each epoch and compares
   consecutive epochs via Procrustes / linear CKA / trustworthiness.
 - `latent_metrics.py` — post-hoc `evaluate_checkpoint()`: activation quality (active units,
@@ -85,9 +97,25 @@ clustering pipeline consume any run unchanged. **Preserve this contract when edi
 | Sampled | `training.train` | reservoir-sample N rows into RAM | stability sweeps, quick runs |
 | All-in-RAM | `early_stopping.train_with_early_stopping` | all filtered rows into RAM | mid-size, wants diagnostics |
 | Streaming | `streaming.train_with_early_stopping_streaming` | streamed from parquet, flat memory | full dataset / OOM-safe |
+| Interleaved | `multi_streaming.train_interleaved` | many per-sample parquets at once | the 95-file cohort |
 
-`Early_Stopping_Tests/Python Files/train_with_early_stopping.py` is the unified CLI: `--streaming`
-selects the streaming trainer, otherwise `--use-all` vs `--sample-rows` picks the other two.
+`Early_Stopping_Tests/Python Files/train_with_early_stopping.py` is the unified CLI:
+`--parquet-paths` (globs accepted) selects the interleaved trainer; otherwise `--parquet-path`
+plus `--streaming`, `--use-all` or `--sample-rows` picks one of the other three.
+`--parquet-paths` is *refused* alongside those three rather than silently ignoring them.
+
+**Multi-file loading** is documented in `MULTI_PARQUET_LOADING.md` (what was built, what was
+measured, what is still unverified); `SAMPLING_STRATEGY.md` is the decision record for why the
+other six strategies were rejected and holds the still-open advisor questions. Run the
+statistics preflight before the first cohort run — it is cheap and its cache is reused:
+
+```bash
+STATS_ONLY=1 bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
+```
+
+`PARQUET_GLOB` defaults to the cohort folder of whichever cluster it detects, so
+it normally needs no value; set it to run on a subset
+(`PARQUET_GLOB='/data/lab/ppmseq_parquets/wt*.parquet'`).
 
 ### How the experiment folders find the core package
 
@@ -153,7 +181,11 @@ Most runs are configured through **environment variables** consumed by the shell
 - Env activation in every `.sh` is manager-agnostic: `CONDA_ENV` wins if set, else
   micromamba `${MAMBA_ENV:-uv_vae}` if the binary exists, else conda `patrickg`. One
   script therefore runs on either cluster unedited.
-- Parquet data under `/cta/users/patrickgao765/parquet_files/`.
+- Parquet data: the 95-sample cohort lives at `/data/lab/ppmseq_parquets/` on **miletus**
+  (shared lab folder, treat as read-only) and at `/cta/users/patrickgao765/parquet_files/`
+  on **tosun**. `tmux_train_multi.sh` picks whichever exists.
+- On miletus the repo is a git clone at `$HOME/pure-internship` (so
+  `$HOME/pure-internship/uv_vae`), not the `$HOME/uv_vae` sibling layout tosun uses.
 - Scripts are edited on Windows, so strip CRLF before submitting: `sed -i 's/\r$//' <script>.sh`.
 - Set `export TQDM_DISABLE=1` for non-interactive jobs.
 - `import matplotlib.pyplot` is deferred inside plotting functions (matplotlib can crash on HPC
