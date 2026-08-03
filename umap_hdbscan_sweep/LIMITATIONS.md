@@ -66,9 +66,8 @@ Specifically:
 - **I never reproduced the original failure.** I diagnosed it by reading the code and the
   log. The reasoning is solid and every number in the log matches, but that is an argument,
   not proof.
-- **I still don't know why the pool failed to be set at the start.** There are two possible
-  reasons and I can't distinguish them from here. The new log line will say which, the next
-  time it runs. That is me admitting I don't know, not me having fixed it.
+- ~~**I still don't know why the pool failed to be set at the start.**~~ **RESOLVED by the
+  smoke test on 2026-08-03 — see section 6.** It was a second, older bug.
 - **The fixed sweep file has never been run.** Not once, not even on tiny fake data. The
   function I edited most — the SigProfiler one — has not executed. A typo there would only
   surface hours into the real run.
@@ -96,9 +95,12 @@ For the DBCV rescoring tool specifically:
 
 ## 4. What could still go wrong, most likely first
 
-1. **The pool still isn't capped, and cuML just uses as much as it wants.** Most likely
-   outcome, and mostly harmless right now — nothing else is on the GPU, so it can have it.
-   But it means the "16 GB" in the log is not a real limit. Watch the new log line.
+1. ~~**The pool still isn't capped.**~~ This is what happened, it was a real bug, and it is
+   now fixed (section 6). **Note the direction of the change:** stage 2 used to run with no
+   GPU limit at all, and now runs with a real 14.4 GB one. The largest demand actually seen
+   was about 4.8 GB, so there is roughly 3x headroom — but a cell that wants more than
+   14.4 GB will now fail where before it would have quietly taken what it needed. If that
+   happens, raise `GPU_TOTAL_GB`.
 2. **Half the grid can't be DBCV-scored.** The 16-dimension cells never saved coordinates,
    so there's nothing to score them against. Not a bug — a decision made when the sweep was
    written. `--reload-umap-models` might rescue them, but that code is untested.
@@ -112,10 +114,44 @@ For the DBCV rescoring tool specifically:
 
 ## 5. How you'll find out
 
-Run the fast smoke test (in the commit message and the chat log). It takes about a minute
-and reproduces the exact failure sequence — cuML allocates, the SigProfiler helper gets
-imported, then HDBSCAN allocates again. Under the old code, that last step is what died.
-
-It also prints the new log line, which finally answers why the pool wasn't set.
+Run the fast smoke test (in the commit message for the RMM fix). It takes about a minute and
+reproduces the exact failure sequence — cuML allocates, the SigProfiler helper gets imported,
+then HDBSCAN allocates again. Under the old code, that last step is what died.
 
 **Do that before committing days of GPU time to the full sweep.**
+
+---
+
+## 6. Update, 2026-08-03: the smoke test found a second bug
+
+It passed, and the new log line paid for itself immediately:
+
+```
+rmm.reinitialize failed (RuntimeError: Initial pool size required to be a
+multiple of 256 bytes)
+```
+
+The pool has a size and a *starting* size. The code rounded the size to a multiple of 256
+as the library demands, but computed the starting size as "a quarter of that" and never
+rounded it — and a quarter of a multiple of 256 is only *sometimes* another multiple of 256.
+
+So whether a memory limit got applied at all depended on the arithmetic of the particular
+numbers involved:
+
+| who | asked for | starting size | result |
+|---|---|---|---|
+| the sweep | 14.4 GB | 3,865,470,528 | **rejected — no limit applied** |
+| the SigProfiler helper | 4 GB | 1,073,741,824 | accepted |
+| stage 1 | 1.5 GB | 402,653,184 | accepted |
+
+That is the whole conspiracy. The limit the sweep *asked for* was the one that couldn't be
+applied; the limit that *overwrote* it was one that could. So the only limit ever in force
+was the wrong one, and it landed on a pool already 3.7 GB full.
+
+This bug has been in the file since it was written, so **any run whose quarter-size wasn't
+256-aligned has silently had no GPU memory limit — training included.** Fixed in `deaaa35`.
+
+Worth noting what this says about section 3: the local tests could not have found this.
+They stubbed out the library, and a stub accepts whatever you hand it. Only the real
+library enforces the rule that was being broken. The one-minute smoke test found in one
+run what the entire local test suite was structurally unable to see.
