@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import traceback
 from datetime import datetime
@@ -98,7 +99,19 @@ def parse_args() -> argparse.Namespace:
 
 
 def run_sigprofiler(analysis_path: Path, output_root: Path, args: argparse.Namespace) -> dict | None:
-    """Reuse the clustering pipeline's SigProfiler block (lazy import -- it is heavy)."""
+    """Reuse the clustering pipeline's SigProfiler block (lazy import -- it is heavy).
+
+    ``UV_VAE_DISABLE_CUML`` is not optional here, and must be set BEFORE the import.
+    run_variant_cluster_pipeline installs a GPU budget at module scope with the
+    default rmm share (0.25) -- correct for the training path it was written for,
+    wrong for this one. Importing it mid-sweep reinitialises the RMM pool that cuML
+    UMAP/HDBSCAN is already allocating from, to a quarter of the budget, while the
+    live pool is larger than that: every cell after the first then dies with
+    "maximum pool size exceeded". The same flag also skips ``cuml.accel.install()``,
+    which is equally unwanted -- this stage calls cuML explicitly, and patching the
+    estimator stack half way through would change which HDBSCAN later cells get.
+    """
+    os.environ["UV_VAE_DISABLE_CUML"] = "1"
     import run_variant_cluster_pipeline as rvcp
 
     cluster_stats = rvcp.query_cluster_stats(analysis_path, threads=args.threads)
@@ -328,6 +341,7 @@ def main() -> int:
             cell_dir.mkdir(parents=True, exist_ok=True)
             cell_started = perf_counter()
             cell_name = f"{umap_config.label()}/{hdbscan_config.label()}"
+            fitted_hdbscan = None
             try:
                 fitted_hdbscan = core.fit_hdbscan(
                     fit_space, hdbscan_config, use_gpu=use_gpu,
@@ -389,6 +403,13 @@ def main() -> int:
                 metrics_path.write_text(json.dumps(payload, indent=2))
                 cells.append(payload)
                 log(f"    [{hdbscan_config.label()}] FAILED: {type(exc).__name__}: {exc}")
+            finally:
+                # Drop this cell's clusterer before the next one is fitted. Rebinding
+                # the name at the top of the next iteration would only release it AFTER
+                # that fit had already allocated, so the pool briefly holds two -- and
+                # with prediction_data=True each one keeps a per-row structure on the
+                # GPU, which at 157M rows is not a rounding error.
+                fitted_hdbscan = None
 
     ok = [cell for cell in cells if "error" not in cell]
     scored = [cell for cell in ok if cell.get("dbcv") is not None
