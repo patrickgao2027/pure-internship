@@ -1,142 +1,41 @@
 # What has and hasn't been checked (sweep GPU fix + DBCV rescore)
 
-Written 2026-08-03, after the stage-2 sweep failed on every cell but the first.
+Last updated 2026-08-03, after the smoke test on miletus.
 Plain-language companion to the code. Read this before trusting either change.
 
 ---
 
-## 1. What went wrong in the sweep
+## 1. What went wrong, and why it took a while to see
 
-Stage 2 ran fine for one cell, then every cell after it died with
-`maximum pool size exceeded`.
+The stage-2 sweep ran one cell successfully, then every cell after it died with
+`maximum pool size exceeded` — the same three numbers every time (3.7 GB in use,
+4.0 GB ceiling, 1.1 GB requested).
 
-The cause, in order:
+It turned out to be **two separate bugs that happened to line up**.
 
-1. cuML (the GPU clustering library) gets its memory from a **pool** — one big block
-   reserved up front, which everything else allocates out of.
-2. The sweep starts, tries to set that pool's size, and fails. It logs
-   `rmm 0 GB (not installed)` and carries on. cuML then makes its **own** pool instead,
-   which quietly grows as UMAP and the first HDBSCAN need more room — up to about 3.7 GB.
-3. The first cell finishes and calls SigProfiler. To do that it imports a helper file,
-   `run_variant_cluster_pipeline.py`. **Just importing that file resets the pool** — it
-   was written for training, and it caps the pool at 4 GB.
-4. So now there's a pool that already has 3.7 GB in use and a new ceiling of 4 GB. The
-   next cell asks for 1.1 GB, there's only 0.3 GB of headroom, and it dies. Every
-   remaining cell dies the same way, forever, because the ceiling never lifts.
+### Bug A — a file that changes GPU settings just by being imported
 
-That's why the failures were byte-for-byte identical each time: same 3.7 / 4.0 / 1.1 GB.
+cuML (the GPU clustering library) takes its memory from a **pool**: one big block
+reserved up front that everything else allocates out of.
 
-### What was changed
+1. The sweep starts and tries to set the pool's size. It fails (that's Bug B), logs
+   something misleading, and carries on. cuML then makes its **own** pool, which grows
+   as UMAP and the first HDBSCAN need room — up to about 3.7 GB.
+2. The first cell finishes and calls SigProfiler. Doing that imports a helper file,
+   `run_variant_cluster_pipeline.py`. **Merely importing that file resets the pool** —
+   it was written for training, and caps the pool at 4 GB.
+3. So now: 3.7 GB already in use, new ceiling 4.0 GB, next cell wants 1.1 GB. Dead. And
+   it stays dead, because the ceiling never lifts.
 
-- **The sweep now sets `UV_VAE_DISABLE_CUML=1` before importing that helper.** The
-  helper already supports this flag — its own comments warn about exactly this hazard —
-  the sweep just never used it. This is the actual fix.
-- **A pool, once set, is never replaced by a smaller one.** Insurance, so no other file
-  can do the same thing in future.
-- **The log now says *why* the pool wasn't set.** Previously three different problems all
-  printed the same misleading `(not installed)`, which is why this took hours to find.
-- **Each cell's clusterer is released before the next one starts**, instead of after.
-  Previously two were briefly held on the GPU at once.
+### Bug B — the pool size was rounded, the *starting* size wasn't
 
----
+A pool has a size and a *starting* size. The code rounded the size to a multiple of 256
+as the library requires, then computed the starting size as "a quarter of that" and
+never rounded it. A quarter of a multiple of 256 is only *sometimes* another multiple
+of 256.
 
-## 2. What I actually checked, and what it proves
-
-| What I ran | What it genuinely proves |
-|---|---|
-| Fake-memory test of the pool rules | The *bookkeeping* is right — the correct number wins when the pool is set twice |
-| End-to-end test of the DBCV tool on made-up data | The tool runs, and the plumbing lines up correctly |
-| The project's own test suite (87 pass, 7 skip) | I didn't break anything else in the package |
-| Timing measurements of the DBCV scoring | Rough cost, on made-up data, on a Windows laptop |
-
----
-
-## 3. What I could NOT check — the important part
-
-**Nothing was tested on a real GPU.** My machine has no `cuml` and no `rmm`. Every test
-replaced them with fake stand-ins that just record what they were asked to do. So the
-tests confirm the *logic* is consistent, and confirm nothing at all about how the real
-libraries behave.
-
-This matters more than it sounds: **the bug was caused by a real library doing something
-unexpected, and my tests are structurally incapable of catching that kind of bug.**
-
-Specifically:
-
-- **I never reproduced the original failure.** I diagnosed it by reading the code and the
-  log. The reasoning is solid and every number in the log matches, but that is an argument,
-  not proof.
-- ~~**I still don't know why the pool failed to be set at the start.**~~ **RESOLVED by the
-  smoke test on 2026-08-03 — see section 6.** It was a second, older bug.
-- **The fixed sweep file has never been run.** Not once, not even on tiny fake data. The
-  function I edited most — the SigProfiler one — has not executed. A typo there would only
-  surface hours into the real run.
-- **The 7 skipped tests in the project's suite are the GPU ones.** The suite passing is
-  real but weak evidence: not one of its tests touches the code I changed.
-
-For the DBCV rescoring tool specifically:
-
-- **The test data was three tidy round blobs, far apart.** Real data is a continuous smear
-  with fuzzy edges, very unequal cluster sizes, and about half the points marked as noise.
-  My test proves the tool can tell "correct" from "random". It says nothing about whether
-  it can sensibly rank two *plausible* clusterings against each other — which is the whole
-  job.
-- **Tested on 50,000 rows; the real run is 157,501,580.** Three thousand times bigger.
-- **My "about 25 minutes for all cells" estimate is not measured.** It assumes reading the
-  saved files only touches the 2 columns needed, ignoring the other ~40. That's how the
-  library is supposed to work, but I never timed it on a real file. If I'm wrong, that step
-  is roughly 20× slower.
-- **The "1 hour for a 5,709-cluster cell" figure is an extrapolation**, stretched 14× past
-  anything I measured, from only two reliable data points.
-- **Two features have never run at all:** `--reload-umap-models` and `--top-n`. The first
-  is a whole function that could fail on its first line.
-
----
-
-## 4. What could still go wrong, most likely first
-
-1. ~~**The pool still isn't capped.**~~ This is what happened, it was a real bug, and it is
-   now fixed (section 6). **Note the direction of the change:** stage 2 used to run with no
-   GPU limit at all, and now runs with a real 14.4 GB one. The largest demand actually seen
-   was about 4.8 GB, so there is roughly 3x headroom — but a cell that wants more than
-   14.4 GB will now fail where before it would have quietly taken what it needed. If that
-   happens, raise `GPU_TOTAL_GB`.
-2. **Half the grid can't be DBCV-scored.** The 16-dimension cells never saved coordinates,
-   so there's nothing to score them against. Not a bug — a decision made when the sweep was
-   written. `--reload-umap-models` might rescue them, but that code is untested.
-3. **The heavily-fragmented cells can't be scored either**, because the scoring cost grows
-   with the *square* of the cluster count. Cells with thousands of clusters are skipped by
-   default. They're not cells you'd pick anyway.
-4. **A plain mistake in the edited sweep file.** Low probability, high annoyance — it would
-   cost you hours before showing up.
-
----
-
-## 5. How you'll find out
-
-Run the fast smoke test (in the commit message for the RMM fix). It takes about a minute and
-reproduces the exact failure sequence — cuML allocates, the SigProfiler helper gets imported,
-then HDBSCAN allocates again. Under the old code, that last step is what died.
-
-**Do that before committing days of GPU time to the full sweep.**
-
----
-
-## 6. Update, 2026-08-03: the smoke test found a second bug
-
-It passed, and the new log line paid for itself immediately:
-
-```
-rmm.reinitialize failed (RuntimeError: Initial pool size required to be a
-multiple of 256 bytes)
-```
-
-The pool has a size and a *starting* size. The code rounded the size to a multiple of 256
-as the library demands, but computed the starting size as "a quarter of that" and never
-rounded it — and a quarter of a multiple of 256 is only *sometimes* another multiple of 256.
-
-So whether a memory limit got applied at all depended on the arithmetic of the particular
-numbers involved:
+So whether a memory limit got applied **at all** depended on the arithmetic of the
+particular numbers involved:
 
 | who | asked for | starting size | result |
 |---|---|---|---|
@@ -144,14 +43,123 @@ numbers involved:
 | the SigProfiler helper | 4 GB | 1,073,741,824 | accepted |
 | stage 1 | 1.5 GB | 402,653,184 | accepted |
 
-That is the whole conspiracy. The limit the sweep *asked for* was the one that couldn't be
-applied; the limit that *overwrote* it was one that could. So the only limit ever in force
-was the wrong one, and it landed on a pool already 3.7 GB full.
+That's the conspiracy. The limit the sweep *asked for* couldn't be applied; the limit
+that *overwrote* it could. The only ceiling ever in force was the wrong one, and it
+landed on a pool already 3.7 GB full.
 
-This bug has been in the file since it was written, so **any run whose quarter-size wasn't
-256-aligned has silently had no GPU memory limit — training included.** Fixed in `deaaa35`.
+This bug has been in the file since it was written. **Any run whose quarter-size wasn't
+256-aligned has silently had no GPU memory limit — training included** (see section 6).
 
-Worth noting what this says about section 3: the local tests could not have found this.
-They stubbed out the library, and a stub accepts whatever you hand it. Only the real
-library enforces the rule that was being broken. The one-minute smoke test found in one
-run what the entire local test suite was structurally unable to see.
+### What changed
+
+| commit | change |
+|---|---|
+| `83234e4` | sweep sets `UV_VAE_DISABLE_CUML=1` before importing the helper — the actual fix for Bug A. The helper already supported this flag; the sweep just never used it |
+| `83234e4` | the log now says *why* a pool wasn't set. Three different problems used to print the same misleading `(not installed)` |
+| `83234e4` | a pool, once set, is never replaced by a smaller one — insurance so nothing else can repeat Bug A |
+| `83234e4` | each cell's clusterer is released before the next starts, not after; two were briefly held at once |
+| `deaaa35` | both pool sizes are now rounded to 256 — the fix for Bug B |
+| `00afcb8` | `rescore_dbcv.py`, to recover DBCV scores (section 4) |
+
+---
+
+## 2. What has been verified on real hardware
+
+One smoke test, run on miletus at commit `04ebbff` (so it covers Bug A's fix, **not**
+Bug B's). It reproduced the exact failure sequence — cuML allocates, the SigProfiler
+helper is imported, HDBSCAN allocates again — and passed:
+
+- HDBSCAN still allocated after the helper import. Under the old code this is the step
+  that died. **Bug A's fix works.**
+- The new log line printed the real error, which is how Bug B was found at all.
+- It confirmed the pool was never capped (`pool after import: None`), meaning the sweep
+  had been running with no GPU limit whatsoever.
+
+**That is the only real-hardware verification that exists.**
+
+## 3. What has *not* been verified
+
+- **The Bug B fix has not run on a GPU.** It was checked against a stand-in that imitates
+  the library's 256-byte rule across 112 budget/share combinations, and against the exact
+  failing case. But no real RMM has accepted it yet. Re-running the smoke test confirms it
+  in about a minute.
+- **`stage2_sweep.py` has still never been executed end-to-end.** The smoke test performed
+  the same *steps* as `run_sigprofiler`, by hand — it did not call that function. The
+  edited function itself remains unrun. A plain typo there would surface hours into a run.
+- **Everything else was tested with stand-ins or invented data**, on a Windows laptop with
+  no `cuml` and no `rmm`. Those tests confirm the logic is self-consistent and confirm
+  nothing about how the real libraries behave. Bug B is the proof: a stand-in accepts
+  whatever you hand it, so the local tests were *structurally incapable* of catching it.
+  One minute on real hardware found what the whole local suite could not.
+- **The project's own test suite passes (87 pass, 7 skip) but is weak evidence here** —
+  all 7 skips are the GPU tests, and no test touches `gpu_budget` at all.
+- **The full sweep has not been re-run**, so nothing above is confirmed at scale.
+
+---
+
+## 4. The DBCV rescore tool — design limits, not bugs
+
+Background: cuML's HDBSCAN can't produce a DBCV score, so every GPU-fitted cell records
+`dbcv: null`, and the sweep's "best cell" selection — which ranks by DBCV — would come
+back empty across all 480 cells. `rescore_dbcv.py` recovers a score afterwards without
+refitting anything.
+
+These are permanent properties of the approach, and are recorded in its output rather
+than hidden:
+
+- **It is not exact, and can't be.** The scoring method compares every pair of clusters,
+  so cost grows with the *square* of the number of points. 157.5M rows is unreachable by
+  a wide margin. It scores a fixed 25,000-row sample that every cell shares, so cells stay
+  comparable to each other. It's a **ranking score, not an absolute DBCV.**
+- **Half the grid can't be scored.** Cells using 16-dimension UMAP never saved their
+  coordinates (only 2-D cells did), so there's nothing to score them against. Not a bug —
+  a decision baked into how the sweep writes its output. `--reload-umap-models` might
+  rescue them, but **that code path has never been run.**
+- **Heavily fragmented cells can't be scored either.** Cost also grows with the square of
+  the *cluster count*: 200 clusters takes 5 seconds, 400 takes 17. A 5,709-cluster cell
+  extrapolates to roughly an hour on its own, so cells above 500 clusters are skipped by
+  default. They aren't cells you'd choose anyway.
+- **Clusters with fewer than 4 sampled points are treated as noise**, because the scoring
+  code divides by (points − 1) and crashes otherwise. How many clusters and points this
+  discarded is recorded per cell — a score taken after throwing away most of a fragmented
+  clustering is not comparable to one that kept everything.
+- **It was tested on three tidy round blobs, far apart, at 50,000 rows.** Real data is a
+  continuous smear with fuzzy edges and ~50% noise, at 157.5M rows. The test proves it can
+  tell "correct" from "random". It says nothing about ranking two *plausible* clusterings,
+  which is the actual job.
+- **The "about 25 minutes for all cells" estimate is not measured.** It assumes reading the
+  saved files only touches the 2 columns needed and skips the other ~40. That's how the
+  library is meant to work, but it was never timed on a real file. If that's wrong, the
+  step is roughly 20× slower.
+- **`--top-n` has never been run either.**
+
+---
+
+## 5. What could still go wrong, most likely first
+
+1. **A cell now runs out of memory that previously wouldn't have.** Note the direction of
+   the change: stage 2 used to run with *no* GPU limit (that was Bug B) and now runs with a
+   real 14.4 GB one. The largest demand actually observed was about 4.8 GB, so there's
+   roughly 3× headroom — but anything wanting more than 14.4 GB will now fail where before
+   it quietly took what it needed. If that happens, raise `GPU_TOTAL_GB`.
+2. **Half the grid can't be DBCV-scored** (section 4). You'll be selecting among the 2-D
+   cells unless `--reload-umap-models` works, and that's untested.
+3. **A plain mistake in the edited sweep file.** Low probability, high annoyance — it costs
+   hours before showing up, because that file has never been run.
+
+---
+
+## 6. Side effect worth knowing about past runs
+
+Because Bug B has existed since `gpu_budget.py` was written, **the GPU memory ceiling
+recorded in past `training_report.json` files was frequently never actually enforced.**
+
+Training results are unaffected — those runs had the whole card to themselves, so an
+unenforced ceiling changed nothing about the numbers. But if you cite the GPU budget from
+a past run as a constraint the run operated under, that claim isn't reliable. What the
+report recorded is what was *requested*, not necessarily what was *applied*.
+
+Runs where the quarter-size happened to land on a 256-byte boundary (like stage 1's
+1.5 GB) did have a real limit. There is no way to tell which was which from the old logs,
+because the failure printed the same text as success-with-no-RMM-installed. From `83234e4`
+onward the log distinguishes them.
