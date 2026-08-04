@@ -264,29 +264,15 @@ class HdbscanConfig:
     min_cluster_size: int = 500
     min_samples: int = 25
     metric: str = "euclidean"
-    # Both default to hdbscan's own defaults, so an existing grid behaves exactly as it did
-    # before these fields existed -- including ``label()``, which still returns
-    # "mcs500_ms25" unless one of them is moved off its default. That is load-bearing:
-    # stage 2 resumes by matching those directory names, so a changed label would silently
-    # re-run every completed cell into a new directory.
-    cluster_selection_method: str = "eom"
-    cluster_selection_epsilon: float = 0.0
 
     def label(self) -> str:
-        parts = [f"mcs{self.min_cluster_size}", f"ms{self.min_samples}"]
-        if self.cluster_selection_method != "eom":
-            parts.append(self.cluster_selection_method)
-        if self.cluster_selection_epsilon:
-            parts.append(f"eps{self.cluster_selection_epsilon:g}")
-        return "_".join(parts)
+        return f"mcs{self.min_cluster_size}_ms{self.min_samples}"
 
     def as_dict(self) -> dict:
         return {
             "min_cluster_size": self.min_cluster_size,
             "min_samples": self.min_samples,
             "metric": self.metric,
-            "cluster_selection_method": self.cluster_selection_method,
-            "cluster_selection_epsilon": self.cluster_selection_epsilon,
         }
 
 
@@ -343,14 +329,6 @@ def fit_hdbscan(
     use_gpu = gpu_available() if use_gpu is None else use_gpu
     X = _as_float32(X)
 
-    # Forwarded only when it is off its default. 0.0 IS the default in both backends, so
-    # omitting it is behaviourally identical -- and it means a cuML build that predates the
-    # parameter still runs every existing grid rather than dying on an unexpected kwarg.
-    epsilon = (
-        {"cluster_selection_epsilon": float(config.cluster_selection_epsilon)}
-        if config.cluster_selection_epsilon else {}
-    )
-
     if use_gpu:
         from cuml.cluster.hdbscan import HDBSCAN as CuHDBSCAN
 
@@ -358,10 +336,9 @@ def fit_hdbscan(
             min_cluster_size=int(config.min_cluster_size),
             min_samples=int(config.min_samples),
             metric=config.metric,
-            cluster_selection_method=config.cluster_selection_method,
+            cluster_selection_method="eom",
             prediction_data=True,
             gen_min_span_tree=True,
-            **epsilon,
         )
         clusterer.fit(X)
         backend = "cuml"
@@ -376,12 +353,11 @@ def fit_hdbscan(
             min_cluster_size=int(config.min_cluster_size),
             min_samples=int(config.min_samples),
             metric=config.metric,
-            cluster_selection_method=config.cluster_selection_method,
+            cluster_selection_method="eom",
             core_dist_n_jobs=int(core_dist_n_jobs),
             gen_min_span_tree=True,
             memory=memory,
             prediction_data=True,
-            **epsilon,
         )
         clusterer.fit(np.asarray(X, dtype=np.float64))
         backend = "hdbscan"
