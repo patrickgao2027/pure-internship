@@ -41,6 +41,13 @@ distance scale.
     Regress first for a warm start in the right frame, then fine-tune under UMAP loss.
     Keeps the alignment of the first and the boundary behaviour of the second.
 
+``gate1``
+    Not an approximation at all -- it measures the criterion. Fits cuML three times and
+    asks how much cuML's own answer moves between runs, which is the ceiling any
+    approximation could possibly reach. Run this before tuning anything: a score of 0.44
+    means one thing against a ceiling of 0.95 and something entirely different against a
+    ceiling of 0.5.
+
 Nothing here calls TensorFlow. The env's TF install cannot see the Blackwell GPU
 (``Cannot dlopen some GPU libraries``), which is what ruled out umap-learn's own
 parametric implementation; torch already runs on this card for VAE training.
@@ -74,7 +81,7 @@ import torch
 import torch.nn as nn
 
 import sweep_core as core
-from aumap import compare_embeddings
+from aumap import compare_embeddings, knn_overlap
 
 FULL_COHORT_HELD_ROWS = 152_501_580
 
@@ -398,13 +405,153 @@ def procrustes_align(source: np.ndarray, target: np.ndarray) -> np.ndarray:
     return (source_c @ rotation) * scale + target_centre
 
 
+# ── gate 1: the determinism floor ──────────────────────────────────────────────
+
+def run_gate1(latent, fit_idx: np.ndarray, probe_idx: np.ndarray,
+              args: argparse.Namespace, output_dir: Path, started: float) -> int:
+    """How much does cuML's own answer move between runs?
+
+    Every approximation in this file is scored by kNN-overlap against one particular cuML
+    embedding, which only means something if cuML agrees with itself. Three variants, each
+    admitting one more source of movement:
+
+    ``transform_repeat``
+        One fitted model, probe transformed twice. Isolates ``transform()`` alone.
+    ``same_seed_refit``
+        Two fits, identical rows and identical seed. Adds fit reproducibility -- GPU
+        atomics and thread scheduling make this less than certain even with a pinned seed.
+    ``different_seed_refit``
+        Seed 42 vs 43 on the same rows. The honest ceiling: what re-running the pipeline
+        tomorrow would give. An approximation scoring here is as close to "the" answer as
+        a second real run is, and no approximation can be shown to do better.
+
+    Also reported: how well the true ``transform()`` preserves the *16-D latent*
+    neighbourhood. If that is itself low, then fidelity to ``transform()`` and fidelity to
+    the data are different targets, and the first may be the wrong thing to optimise.
+    """
+    fit_latent = np.ascontiguousarray(latent[fit_idx])
+    probe_latent = np.ascontiguousarray(latent[probe_idx])
+    log(f"gate 1: {len(fit_idx):,} fit rows, {len(probe_idx):,} probe rows, 3 fits ahead")
+
+    def fit_once(seed: int, label: str):
+        config = core.UmapConfig(
+            n_neighbors=args.umap_n_neighbors, min_dist=args.umap_min_dist,
+            n_components=2, seed=seed, n_epochs=200,
+        )
+        log(f"[{label}] fitting UMAP (seed={seed}) ...")
+        t0 = perf_counter()
+        fitted = core.fit_umap(fit_latent, config)
+        seconds = perf_counter() - t0
+        log(f"[{label}]   fit in {seconds:.1f}s (backend={fitted.backend})")
+        return fitted, seconds, config
+
+    fit_a, seconds_a, config = fit_once(args.seed, "A")
+    coords_a = fit_a.transform(probe_latent)
+    coords_a_again = fit_a.transform(probe_latent)
+    del fit_a
+
+    fit_b, seconds_b, _ = fit_once(args.seed, "B")
+    coords_b = fit_b.transform(probe_latent)
+    del fit_b
+
+    fit_c, seconds_c, _ = fit_once(args.seed + 1, "C")
+    coords_c = fit_c.transform(probe_latent)
+    del fit_c
+
+    def score(reference: np.ndarray, other: np.ndarray, label: str) -> dict:
+        log(f"scoring {label} (kNN on {len(reference):,} points, takes a moment) ...")
+        aligned = compare_embeddings(reference, procrustes_align(other, reference), k=15)
+        raw = compare_embeddings(reference, other, k=15)
+        log(f"  {label}: kNN-overlap {aligned['knn_overlap']:.4f}")
+        return {"aligned": aligned, "raw": raw}
+
+    variants = {
+        "transform_repeat": score(coords_a, coords_a_again, "transform_repeat"),
+        "same_seed_refit": score(coords_a, coords_b, "same_seed_refit"),
+        "different_seed_refit": score(coords_a, coords_c, "different_seed_refit"),
+    }
+    variants["transform_repeat"]["bitwise_identical"] = bool(
+        np.array_equal(coords_a, coords_a_again)
+    )
+
+    # Cross-space, not 2-D vs 2-D: neighbours in the 16-D latent against neighbours in the
+    # embedding. An upper bound on what any 2-D map of this data can retain.
+    log("scoring latent-space neighbour preservation of the true transform() ...")
+    latent_preservation = round(knn_overlap(probe_latent, coords_a, k=15), 5)
+    log(f"  latent 16-D -> 2-D preservation: {latent_preservation:.4f}")
+
+    repeat = variants["transform_repeat"]["aligned"]["knn_overlap"]
+    same_seed = variants["same_seed_refit"]["aligned"]["knn_overlap"]
+    floor = variants["different_seed_refit"]["aligned"]["knn_overlap"]
+
+    results = {
+        "run_timestamp": datetime.now(timezone.utc).isoformat(),
+        "mode": "gate1",
+        "umap_config": config.as_dict(),
+        "fit_rows": int(len(fit_idx)),
+        "probe_rows": int(len(probe_idx)),
+        "seeds": {"a": args.seed, "b": args.seed, "c": args.seed + 1},
+        "timing": {
+            "fit_a_seconds": round(seconds_a, 2),
+            "fit_b_seconds": round(seconds_b, 2),
+            "fit_c_seconds": round(seconds_c, 2),
+        },
+        "variants": variants,
+        "latent_neighbour_preservation": latent_preservation,
+        "determinism_floor_knn_overlap": floor,
+        "aumap_baseline": AUMAP_BASELINE,
+        "total_seconds": round(perf_counter() - started, 1),
+    }
+    out_path = output_dir / "gate1_determinism.json"
+    out_path.write_text(json.dumps(results, indent=2))
+    log(f"wrote {out_path}")
+
+    identical = "yes" if variants["transform_repeat"]["bitwise_identical"] else "no"
+    print("\n-- Gate 1: cuML determinism floor ----------------------")
+    print(f"probe rows: {len(probe_idx):,} held out of a {len(fit_idx):,}-row fit")
+    print()
+    print("how much cuML's own answer moves, by what is allowed to vary:")
+    print(f"  transform() twice, one model   {repeat:.3f}   (bitwise identical: {identical})")
+    print(f"  refit, same seed + same rows   {same_seed:.3f}")
+    print(f"  refit, different seed          {floor:.3f}   <- the ceiling")
+    print()
+    print("for comparison, scored against that same fit A:")
+    print(f"  aUMAP interpolation            {AUMAP_BASELINE['knn_overlap']:.3f}")
+    print()
+    print("reference, not a comparison (16-D latent vs 2-D embedding):")
+    print(f"  true transform() retains       {latent_preservation:.3f} of latent neighbours")
+    print("--------------------------------------------------------")
+
+    if floor >= 0.8:
+        print("\nThe target is stable, so kNN-overlap against one fit is a fair criterion")
+        print("and the approximations genuinely failed. The gap is real -- keep chasing it.")
+    elif floor > AUMAP_BASELINE["knn_overlap"]:
+        print(f"\nThe ceiling is {floor:.3f}, not 1.0. Read every approximation as a fraction")
+        print("of that: aUMAP's 0.440 is already a good part of the way, and the honest")
+        print("question is what fraction of the ceiling is enough for HDBSCAN, which only")
+        print("cluster-label agreement (ARI) can answer.")
+    else:
+        print(f"\nThe ceiling is {floor:.3f}, at or below aUMAP's 0.440. Two independent cuML")
+        print("runs disagree about the probe neighbourhood as much as an approximation")
+        print("does, so 'reproduce this embedding' is not a well-posed target and no")
+        print("amount of tuning can be shown to have helped. Switch the criterion to")
+        print("something two real runs would agree on: HDBSCAN label agreement (ARI)")
+        print("between them, or preservation of the 16-D latent neighbourhood above,")
+        print("which is where the biology actually lives.")
+    return 0
+
+
 # ── validation entry point ─────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train and validate parametric UMAP")
     parser.add_argument("--embed-dir", required=True)
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--mode", default="hybrid", choices=["regress", "umap", "hybrid"])
+    parser.add_argument("--mode", default="hybrid",
+                        choices=["regress", "umap", "hybrid", "gate1"],
+                        help="gate1 trains nothing -- it fits cuML three times to measure "
+                             "how much cuML's own answer moves, which is the ceiling the "
+                             "other three modes are scored against")
     parser.add_argument("--fit-rows", type=int, default=5_000_000)
     parser.add_argument("--probe-rows", type=int, default=200_000)
     parser.add_argument("--hidden", default="256,256,128")
@@ -467,6 +614,11 @@ def main() -> int:
         )
     )
     log(f"fit set {len(fit_idx):,} rows, probe set {len(probe_idx):,} held-out rows")
+
+    # gate1 measures the criterion rather than an approximation, so it owns its own fits
+    # and shares nothing below but the row selection it has to match exactly.
+    if args.mode == "gate1":
+        return run_gate1(latent, fit_idx, probe_idx, args, output_dir, started)
 
     config = core.UmapConfig(
         n_neighbors=args.umap_n_neighbors, min_dist=args.umap_min_dist,
