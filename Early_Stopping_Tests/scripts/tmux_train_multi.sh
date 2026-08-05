@@ -272,6 +272,19 @@ print("  stopped_early   : {}".format(early.get("stopped_early", "?")))
 print("  best_epoch      : {}".format(early.get("best_epoch", "?")))
 print("  final AU count  : {}".format(early.get("final_active_units", "?")))
 print("  stop_reason     : {}".format(early.get("stop_reason")))
+# Wall clock from the trainer itself, so the duration survives in JSON even when
+# this log does not. The bash TOTAL above measures the runner (stats preflight
+# included); this measures train_interleaved end to end.
+wall = payload.get("wall_clock") or {}
+if wall:
+    print("  wall clock      : {:.0f}s ({:.2f}h)  setup {:.0f}s / loop {:.0f}s / finalize {:.0f}s".format(
+        wall.get("total_seconds") or 0, wall.get("total_hours") or 0,
+        wall.get("setup_seconds") or 0, wall.get("train_loop_seconds") or 0,
+        wall.get("finalize_seconds") or 0))
+    if wall.get("epochs_timed"):
+        print("  epoch wall      : {:.0f}s mean, {:.0f}s min, {:.0f}s max  (n={})".format(
+            wall.get("epoch_mean_seconds") or 0, wall.get("epoch_min_seconds") or 0,
+            wall.get("epoch_max_seconds") or 0, wall["epochs_timed"]))
 PY
     echo "  artifacts        : $RUN_ROOT"
     echo "  sampling plan    : $RUN_ROOT/sampling_plan.json"
