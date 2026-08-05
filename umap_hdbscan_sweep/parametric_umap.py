@@ -405,6 +405,72 @@ def procrustes_align(source: np.ndarray, target: np.ndarray) -> np.ndarray:
     return (source_c @ rotation) * scale + target_centre
 
 
+# ── multi-scale neighbourhood agreement ────────────────────────────────────────
+
+def knn_overlap_profile(a: np.ndarray, b: np.ndarray, ks: list[int],
+                        use_gpu: bool | None = None,
+                        chunk_rows: int = 20_000) -> dict[int, float]:
+    """kNN-overlap at several neighbourhood sizes, from one kNN query per space.
+
+    Different k are different questions, not the same question at different precision.
+    At ``k=15`` the metric asks whether two embeddings order a read's immediate
+    neighbours identically; at ``k=500`` it asks whether they put the read on the same
+    island. An embedding can be noise at the first and near-exact at the second -- and
+    HDBSCAN, whose ``min_cluster_size`` is in the hundreds, only ever reads the second.
+    Reporting a single k=15 number therefore grades an approximation on the one scale
+    the pipeline does not consume.
+
+    ``kneighbors`` returns neighbours in ascending distance, so a query at ``max(ks)``
+    contains every smaller k as a prefix slice: four scales cost one query, not four.
+    """
+    ks = sorted({int(k) for k in ks})
+    n = int(a.shape[0])
+    k_max = ks[-1]
+    if k_max >= n:
+        raise ValueError(f"k={k_max} needs more than {n:,} points")
+    if use_gpu is None:
+        use_gpu = core.gpu_available()
+
+    def neighbours(space: np.ndarray, label: str) -> np.ndarray:
+        space = np.ascontiguousarray(np.asarray(space, dtype=np.float32))
+        t0 = perf_counter()
+        if use_gpu:
+            from cuml.neighbors import NearestNeighbors as CuNN
+
+            # Brute force is exact and GPU-bound at these dimensions; the tree methods
+            # sklearn would pick degrade badly on the 16-D latent anyway.
+            index = CuNN(n_neighbors=k_max + 1, algorithm="brute")
+        else:
+            from sklearn.neighbors import NearestNeighbors
+
+            index = NearestNeighbors(n_neighbors=k_max + 1, algorithm="auto")
+        index.fit(space)
+        found = index.kneighbors(space, return_distance=False)
+        if hasattr(found, "get"):
+            found = found.get()
+        log(f"    kNN({label}, k={k_max}) in {perf_counter() - t0:.1f}s")
+        # column 0 is the point itself
+        return np.ascontiguousarray(found[:, 1:].astype(np.int64, copy=False))
+
+    nbr_a, nbr_b = neighbours(a, "a"), neighbours(b, "b")
+
+    profile: dict[int, float] = {}
+    for k in ks:
+        shared = 0
+        for start in range(0, n, chunk_rows):
+            stop = min(start + chunk_rows, n)
+            # Offsetting by row id makes every key unique to a (row, neighbour) pair, so
+            # one intersection over the chunk counts per-row matches with no Python loop
+            # over rows. Max key is (n-1)*n + n, far inside int64 at any n we run.
+            offset = np.arange(start, stop, dtype=np.int64)[:, None] * n
+            keys_a = (offset + nbr_a[start:stop, :k]).ravel()
+            keys_b = (offset + nbr_b[start:stop, :k]).ravel()
+            shared += int(np.intersect1d(keys_a, keys_b, assume_unique=True).size)
+        profile[k] = round(shared / (n * k), 5)
+        log(f"    k={k:>5}: overlap {profile[k]:.4f}")
+    return profile
+
+
 # ── gate 1: the determinism floor ──────────────────────────────────────────────
 
 def run_gate1(latent, fit_idx: np.ndarray, probe_idx: np.ndarray,
@@ -480,6 +546,20 @@ def run_gate1(latent, fit_idx: np.ndarray, probe_idx: np.ndarray,
     latent_preservation = round(knn_overlap(probe_latent, coords_a, k=15), 5)
     log(f"  latent 16-D -> 2-D preservation: {latent_preservation:.4f}")
 
+    # Refitting to get these back costs three fits, so keep them. Anything downstream --
+    # a k the sweep did not cover, HDBSCAN label agreement -- then runs in seconds.
+    np.save(output_dir / "gate1_probe_idx.npy", probe_idx)
+    np.save(output_dir / "gate1_probe_coords_a.npy", coords_a)
+    np.save(output_dir / "gate1_probe_coords_c.npy", coords_c)
+    log(f"saved probe indices and coordinates (fit A, fit C) to {output_dir}")
+
+    ks = sorted({int(part) for part in args.overlap_ks.split(",") if part.strip()})
+    log(f"k-profile at k = {ks}")
+    log("  different-seed refit (fit A vs fit C):")
+    profile_seed = knn_overlap_profile(coords_a, coords_c, ks)
+    log("  16-D latent vs 2-D embedding (fit A):")
+    profile_latent = knn_overlap_profile(probe_latent, coords_a, ks)
+
     repeat = variants["transform_repeat"]["aligned"]["knn_overlap"]
     same_seed = variants["same_seed_refit"]["aligned"]["knn_overlap"]
     floor = variants["different_seed_refit"]["aligned"]["knn_overlap"]
@@ -498,6 +578,11 @@ def run_gate1(latent, fit_idx: np.ndarray, probe_idx: np.ndarray,
         },
         "variants": variants,
         "latent_neighbour_preservation": latent_preservation,
+        "overlap_profile": {
+            "ks": ks,
+            "different_seed_refit": {str(k): v for k, v in profile_seed.items()},
+            "latent_vs_embedding": {str(k): v for k, v in profile_latent.items()},
+        },
         "determinism_floor_knn_overlap": floor,
         "aumap_baseline": AUMAP_BASELINE,
         "total_seconds": round(perf_counter() - started, 1),
@@ -518,9 +603,34 @@ def run_gate1(latent, fit_idx: np.ndarray, probe_idx: np.ndarray,
     print("for comparison, scored against that same fit A:")
     print(f"  aUMAP interpolation            {AUMAP_BASELINE['knn_overlap']:.3f}")
     print()
-    print("reference, not a comparison (16-D latent vs 2-D embedding):")
-    print(f"  true transform() retains       {latent_preservation:.3f} of latent neighbours")
+    header = "  ".join(f"{'k=' + str(k):>7}" for k in ks)
+    print("overlap by neighbourhood size -- which scale does the disagreement live at?")
+    print(f"                                 {header}")
+    print(f"  refit, different seed          "
+          f"{'  '.join(f'{profile_seed[k]:>7.3f}' for k in ks)}")
+    print(f"  16-D latent vs 2-D embedding   "
+          f"{'  '.join(f'{profile_latent[k]:>7.3f}' for k in ks)}")
     print("--------------------------------------------------------")
+
+    k_big = ks[-1]
+    coarse = profile_seed[k_big]
+    if coarse >= 0.8:
+        print(f"\nThe disagreement is local: two seeds share only {floor:.3f} of the 15 nearest")
+        print(f"neighbours but {coarse:.3f} at k={k_big}. They place reads on the same islands and")
+        print("argue only about ordering inside them, which is exactly the scale HDBSCAN")
+        print(f"ignores. Score approximations at k={k_big}, not 15 -- k=15 is measuring seed noise.")
+    elif coarse >= floor + 0.2:
+        print(f"\nAgreement climbs from {floor:.3f} at k=15 to {coarse:.3f} at k={k_big} but does not")
+        print("reach island-level consensus. Part of the instability is local ordering and")
+        print(f"part is genuine: push the sweep past k={k_big} to find where it plateaus, and")
+        print("treat that plateau as the criterion.")
+    else:
+        print(f"\nAgreement stays near {coarse:.3f} even at k={k_big}, so this is not local jitter --")
+        print("two seeds disagree about island membership itself. No approximation can fix")
+        print("that, because the embedding being approximated is not stable at any scale.")
+        print("Change the UMAP configuration before going further: raise min_dist off 0.0")
+        print("so islands are not packed to the point of arbitrariness, or raise")
+        print("n_neighbors so the graph carries more global structure.")
 
     if floor >= 0.8:
         print("\nThe target is stable, so kNN-overlap against one fit is a fair criterion")
@@ -571,6 +681,11 @@ def parse_args() -> argparse.Namespace:
                              "sees the same repulsion balance the target embedding was "
                              "optimised under. The Sainburg et al. paper code used 2.")
     parser.add_argument("--repulsion-strength", type=float, default=1.0)
+    parser.add_argument("--overlap-ks", default="15,50,200,500",
+                        help="gate1 only: neighbourhood sizes for the multi-scale overlap "
+                             "profile. k=15 matches the UMAP graph; the larger values ask "
+                             "whether two embeddings agree on island membership, which is "
+                             "the scale HDBSCAN actually reads.")
     parser.add_argument("--umap-n-neighbors", type=int, default=15)
     parser.add_argument("--umap-min-dist", type=float, default=0.0)
     parser.add_argument("--infer-batch-size", type=int, default=2_000_000)
