@@ -220,5 +220,49 @@ Rejected:
     d. could be useful if we don't want autoencoder structure 
 
 
+# Week of 7/27 to 8/31
+7/27 
+I got GPU access and was able to start doing tests on the VAE model to finalize a model that can be used for inference.  At the beginning of the week, I had to figure out a way to fit the data into the GPU memory without running out and allocate a specific amount such that I don't take up the entire GPU memory in the cluster.  I allocated myself 16/48 gigabytes to do my training and had Claude generate me code to load the data into the GPU in batches.  Also created my micromamba environment in the miletus HPC.    
+7/28  
+More edits to GPU budgeting and looked at strategies to load data into the GPU / sampling from the 95 parquet files to ensure representative batches.  
+7/29  
+Settled on a sampling strategy.  To make sure that each sample was represented proportionally to the amount each parquet is represented in the full data, I had the weights calculated for each parquet to get the amount that is represented in each batch size pushed into the VAE for training.  Since the data was structured such that groups of ALT, REF, POS, and CHROM were all stacked on top of each other, I had to shuffle the row groups such that the structuring was destroyed.  During one forward phase, the row groups would be shuffled for each parquet and each group would be visited during one batch.  Within the batch N rows are sampled and passed into the batch.  In the next batch this gets repeated, and after one forward pass the groups are shuffle again so that during the next forward pass a different set of row groups are seen first.  The validation set was created by using a hash function (SplitMix64) to generate a hash key for each row in the data, a specific cutoff was set such that 10% of the data would be unseen by the VAE model during training and would be held out as the validation set.  The hash function results in rows that are uniformly distributed for a 10% cutoff is very easy.  Early stopping was settled on a week ago.  I would be looking at val_loss, KL divergence, and active units.  Early stopping would be set to whatever I felt was good, batchsize, learning rate warm up, dropout would all be tuned in the tests.  I did not want to do a sweep, just changing parameters to whatever would work best depending on the results of the initial test.  
+7/30 
+Tests initially had bad results for VAE.  Most of the time, the data was not loading fast enough from the CPU into the GPU ( the problem was converting the data into tensors that are loaded into the GPU for training).  After the data was loaded into the GPU, the calculations were fast but then the GPU was sitting idle waiting for the CPU to continue loading more data.  A potential fix I thought for this was to simply load the data raw into the GPU from CPU and then let the GPU do the convert.  This made the data decoding process slower.  Also for CPU process to decode tried to do make CPU work on decoding the next batch while GPU is doing it's work.    
+7/31
+Did tests on VAE  
+8/1  
+Claude generated UMAP/HDBSCAN sweeps.  
+8/2
+Check claude generated code. Drop SNVQ from dedup process.  Made it so that decode (create tensors + val split creation) uses multiple cores instead of 1 core.  Pre buffer parquet file reader with PyArrow, just puts more of parquet in memory at once and allows for faster loading.  
+8/3  
+Went to bank.  
 
+## Full Cohort VAE Training Runs (95 files, 5.08B eligible rows, latent_dim=16, hidden_dims=[256,128], seed=42)
 
+| Run | Started | Batch | LR | KL Wt | In DO | Hid DO | Pat | Decode | Epochs | Best | AU | Collapsed | Val Total | Val KL | Val Num | Val Cat | Train Total | **Wall Clock** |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 20260730T071636Z | 07-30 07:16 | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | failed, no artifacts |
+| 20260730T084507Z | 07-30 08:45 | 131,072 | 0.001 | 0.05 | 0.1 | 0.4 | 8 | CPU | 20 | 19 | 3/16 | 81.25% | 1.4943 | 5.0760 | 0.4566 | 0.7839 | 1.5768 | **4h 46m** |
+| 20260730T182607Z | 07-30 18:26 | 131,072 | 0.001 | 0.05 | 0.1 | 0.4 | 8 | **GPU** | 20 | 19 | 3/16 | 81.25% | 1.4943 | 5.0760 | 0.4566 | 0.7839 | 1.5768 | **10h 52m** |
+| 20260731T065905Z | 07-31 06:59 | — | — | — | — | — | — | CPU | 30+ | — | — | — | — | — | — | — | — | killed mid-run |
+| 20260731T144544Z | 07-31 14:45 | 1,048,576 | 0.001 | 0.005 | 0.1 | 0.1 | 8 | CPU ×1 | 38 | 30 | 16/16 | 0% | 0.2225 | 28.9258 | 0.0756 | 0.0023 | 0.3126 | **10h 30m** |
+| 20260801T054132Z | 08-01 05:41 | 262,144 | 0.001 | 0.005 | 0.1 | 0.1 | 4 | CPU | 8 | 4 | 16/16 | 0% | 0.2471 | 29.9646 | 0.0933 | 0.0040 | 0.3309 | **1h 45m** |
+| A_patience | 08-01 20:52 | 262,144 | 0.001 | 0.005 | 0.1 | 0.1 | 10 | CPU | 22 | 12 | 16/16 | 0% | 0.2379 | 28.7418 | 0.0912 | 0.0029 | 0.3049 | not logged |
+| B_lowlr | 08-02 02:00 | 262,144 | **0.0005** | 0.005 | 0.1 | 0.1 | 10 | CPU | 25 | 24 | 16/16 | 0% | 0.2377 | 28.3460 | 0.0914 | 0.0046 | 0.2968 | not logged |
+| 20260802T180314Z | 08-02 18:03 | 32,768 | 0.001 | 0.05 | 0.1 | 0.4 | 8 | CPU | 2 | 2 | 4/16 | 81.25% | 1.5778 | 4.5893 | 0.5000 | 0.8483 | 1.5969 | not logged (2 epochs) |
+| 20260802T192756Z | 08-02 19:27 | 1,048,576 | 0.001 | 0.005 | 0.1 | 0.1 | 8 | CPU ×8 | 38 | 30 | 16/16 | 0% | 0.2225 | 28.9258 | 0.0756 | 0.0023 | 0.3126 | **4h 25m** |
+
+### Two controlled comparisons
+
+**GPU decode cost 2.3×** — 084507Z vs 182607Z: identical config, identical results, CPU 4h 46m → GPU 10h 52m.
+
+**Parallel decode workers gained 2.4×** — 144544Z vs 192756Z: identical config, byte-identical results, 1 worker 10h 30m → 8 workers 4h 25m.
+
+Wall times come from the tmux runner logs (`===== END: train =====`), which only exist for 5 of the 8 completed runs. A_patience, B_lowlr and 180314Z have empty `logs/` dirs.
+
+8/4 and 8/5  
+It was a bad idea to just do sweeps through all the potential parameters for UMAP and HDBSCAN at once.  Instead I will settle on a UMAP model first, and then finalize the HDBSCAN.  From 480 trained models that would have come from the sweeps, only 5/480 were able to be completedd.  I analyzed the results of the 5 and saw the UMAP embeddings.  From the UMAP representation, there is better separation of the clusters than before and the cosine similarity had some clusters in the upper 90s.  Silhoutte score was also at least 0.5 for the 5 sweeps of the HDBSCAN parameters.  The problem is that the sweep would have taken 10 days due to the biggest time consumers being transforming the points after UMAP is trained and transforming the points after HDBSCAN is trained.  So the bottleneck right now is transforming the points after the UMAP model is trained.  A solution I am looking at right now is to use parametric UMAP which uses a trained neural network model that has loss function based upon the loss used in UMAP training as a transformer for the points.  
+
+Parametric UMAP sources:
+https://pmc.ncbi.nlm.nih.gov/articles/PMC8516496/
