@@ -144,7 +144,16 @@ main() {
     echo "  row filter  : $ROW_FILTER"
     echo "  split       : $SPLIT_STRATEGY  val_fraction=$VAL_FRACTION"
     echo "  batch       : $BATCH_SIZE   lr: $LEARNING_RATE   beta: $KL_WEIGHT"
-    echo "  decode      : $DECODE_WORKERS worker(s)"
+    # train_interleaved clamps this to 1 under GPU decode unless
+    # UV_VAE_ALLOW_GPU_DECODE_WORKERS=1, so that N concurrent cuDF row-group decodes
+    # cannot exhaust the RMM pool. Say so here rather than printing a count the run
+    # will not use.
+    if [ "${UV_VAE_GPU_DECODE:-0}" = "1" ] && [ "$DECODE_WORKERS" -gt 1 ] \
+        && [ "${UV_VAE_ALLOW_GPU_DECODE_WORKERS:-0}" != "1" ]; then
+        echo "  decode      : $DECODE_WORKERS worker(s) requested -> clamped to 1 (GPU decode)"
+    else
+        echo "  decode      : $DECODE_WORKERS worker(s)"
+    fi
     echo "  epochs      : $EPOCH_CEILING (patience=$PATIENCE, shards=$EPOCH_SHARDS)"
     echo "  GPU budget  : ${UV_VAE_GPU_MEM_GB} GB    threads: $threads"
     echo "  seed        : $SEED"
