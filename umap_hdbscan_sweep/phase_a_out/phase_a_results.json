@@ -1,0 +1,37 @@
+{
+  "run_timestamp": "2026-08-04T13:17:27.699792+00:00",
+  "total_rows": 157501580,
+  "latent_dim": 16,
+  "umap_config": {
+    "n_neighbors": 15,
+    "min_dist": 0.0,
+    "n_components": 2,
+    "metric": "euclidean",
+    "seed": 42,
+    "n_epochs": 200
+  },
+  "timer_split": {
+    "fit_rows": 5000000,
+    "held_rows_timed": 100000,
+    "load_seconds": 2.35,
+    "fit_seconds": 118.93,
+    "transform_seconds_per_held_rows": 2.16,
+    "extrapolated_full_transform_seconds": 3291.4,
+    "extrapolated_full_transform_minutes": 54.9,
+    "fit_fraction_of_fit_plus_transform": 0.982,
+    "backend": "cuml"
+  },
+  "repulsion_probe": {
+    "probe_rows": 200000,
+    "background_rows": 4800000,
+    "condition_a_mean_radial_dist": 8.06931,
+    "condition_b_mean_radial_dist": 8.01964,
+    "condition_a_median_radial_dist": 8.49377,
+    "condition_b_median_radial_dist": 8.31293,
+    "shift_ratio_mean": 0.9938,
+    "shift_ratio_median": 0.9787,
+    "repulsion_confirmed": false,
+    "interpretation": "no significant shift"
+  },
+  "total_seconds": 362.5
+}

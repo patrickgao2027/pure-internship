@@ -1,0 +1,64 @@
+{
+  "run_timestamp": "2026-08-05T11:30:32.699115+00:00",
+  "total_rows": 157501580,
+  "latent_dim": 16,
+  "umap_config": {
+    "n_neighbors": 15,
+    "min_dist": 0.0,
+    "n_components": 2,
+    "metric": "euclidean",
+    "seed": 42,
+    "n_epochs": 200
+  },
+  "fit_rows": 5000000,
+  "probe_rows": 200000,
+  "backend": "cuml",
+  "timing": {
+    "umap_fit_seconds": 115.44,
+    "true_transform_probe_seconds": 4.29,
+    "true_transform_full_cohort_minutes": 54.5,
+    "aumap_index_build_seconds": 0.02,
+    "aumap_probe_seconds_per_k": 1.59,
+    "aumap_full_cohort_seconds": 1215.1,
+    "aumap_full_cohort_minutes": 20.25,
+    "speedup_vs_true_transform": 2.7
+  },
+  "quality_by_interp_k": {
+    "5": {
+      "mean_error_raw": 0.18276,
+      "median_error_raw": 0.01722,
+      "p95_error_raw": 1.15855,
+      "embedding_std": 6.18111,
+      "mean_error_in_std": 0.02957,
+      "median_error_in_std": 0.00279,
+      "p95_error_in_std": 0.18743,
+      "knn_overlap": 0.44016
+    },
+    "15": {
+      "mean_error_raw": 0.25066,
+      "median_error_raw": 0.01958,
+      "p95_error_raw": 1.50002,
+      "embedding_std": 6.18111,
+      "mean_error_in_std": 0.04055,
+      "median_error_in_std": 0.00317,
+      "p95_error_in_std": 0.24268,
+      "knn_overlap": 0.3969
+    },
+    "30": {
+      "mean_error_raw": 0.34227,
+      "median_error_raw": 0.0408,
+      "p95_error_raw": 1.84778,
+      "embedding_std": 6.18111,
+      "mean_error_in_std": 0.05537,
+      "median_error_in_std": 0.0066,
+      "p95_error_in_std": 0.29894,
+      "knn_overlap": 0.28938
+    }
+  },
+  "best_interp_k_by_knn_overlap": 5,
+  "paper_reference_mean_error_in_std": [
+    0.083,
+    0.256
+  ],
+  "total_seconds": 134.3
+}
