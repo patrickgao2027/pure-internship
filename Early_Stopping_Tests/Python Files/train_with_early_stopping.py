@@ -337,6 +337,7 @@ def main() -> int:
                     "sampling": summary.get("sampling", {}),
                     "early_stopping": summary.get("early_stopping", {}),
                     "final_epoch": summary.get("final_epoch", {}),
+                    "wall_clock": summary.get("wall_clock", {}),
                 },
                 indent=2,
             )
@@ -383,6 +384,7 @@ def main() -> int:
                     "row_filter": args.row_filter,
                     "early_stopping": summary.get("early_stopping", {}),
                     "final_epoch": summary.get("final_epoch", {}),
+                    "wall_clock": summary.get("wall_clock", {}),
                 },
                 indent=2,
             )
@@ -434,6 +436,7 @@ def main() -> int:
                 "row_filter": args.row_filter,
                 "early_stopping": summary.get("early_stopping", {}),
                 "final_epoch": summary.get("final_epoch", {}),
+                "wall_clock": summary.get("wall_clock", {}),
             },
             indent=2,
         )

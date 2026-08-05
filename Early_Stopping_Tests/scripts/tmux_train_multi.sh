@@ -144,7 +144,16 @@ main() {
     echo "  row filter  : $ROW_FILTER"
     echo "  split       : $SPLIT_STRATEGY  val_fraction=$VAL_FRACTION"
     echo "  batch       : $BATCH_SIZE   lr: $LEARNING_RATE   beta: $KL_WEIGHT"
-    echo "  decode      : $DECODE_WORKERS worker(s)"
+    # train_interleaved clamps this to 1 under GPU decode unless
+    # UV_VAE_ALLOW_GPU_DECODE_WORKERS=1, so that N concurrent cuDF row-group decodes
+    # cannot exhaust the RMM pool. Say so here rather than printing a count the run
+    # will not use.
+    if [ "${UV_VAE_GPU_DECODE:-0}" = "1" ] && [ "$DECODE_WORKERS" -gt 1 ] \
+        && [ "${UV_VAE_ALLOW_GPU_DECODE_WORKERS:-0}" != "1" ]; then
+        echo "  decode      : $DECODE_WORKERS worker(s) requested -> clamped to 1 (GPU decode)"
+    else
+        echo "  decode      : $DECODE_WORKERS worker(s)"
+    fi
     echo "  epochs      : $EPOCH_CEILING (patience=$PATIENCE, shards=$EPOCH_SHARDS)"
     echo "  GPU budget  : ${UV_VAE_GPU_MEM_GB} GB    threads: $threads"
     echo "  seed        : $SEED"
@@ -263,6 +272,19 @@ print("  stopped_early   : {}".format(early.get("stopped_early", "?")))
 print("  best_epoch      : {}".format(early.get("best_epoch", "?")))
 print("  final AU count  : {}".format(early.get("final_active_units", "?")))
 print("  stop_reason     : {}".format(early.get("stop_reason")))
+# Wall clock from the trainer itself, so the duration survives in JSON even when
+# this log does not. The bash TOTAL above measures the runner (stats preflight
+# included); this measures train_interleaved end to end.
+wall = payload.get("wall_clock") or {}
+if wall:
+    print("  wall clock      : {:.0f}s ({:.2f}h)  setup {:.0f}s / loop {:.0f}s / finalize {:.0f}s".format(
+        wall.get("total_seconds") or 0, wall.get("total_hours") or 0,
+        wall.get("setup_seconds") or 0, wall.get("train_loop_seconds") or 0,
+        wall.get("finalize_seconds") or 0))
+    if wall.get("epochs_timed"):
+        print("  epoch wall      : {:.0f}s mean, {:.0f}s min, {:.0f}s max  (n={})".format(
+            wall.get("epoch_mean_seconds") or 0, wall.get("epoch_min_seconds") or 0,
+            wall.get("epoch_max_seconds") or 0, wall["epochs_timed"]))
 PY
     echo "  artifacts        : $RUN_ROOT"
     echo "  sampling plan    : $RUN_ROOT/sampling_plan.json"
