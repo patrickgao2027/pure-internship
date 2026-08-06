@@ -272,9 +272,15 @@ def parse_args() -> argparse.Namespace:
                         help="pairs sampled from --pair-rows for Spearman/Pearson")
     parser.add_argument("--metric-k", type=int, default=15,
                         help="neighbourhood size for trustworthiness and continuity")
-    parser.add_argument("--metric-k-max", type=int, default=100,
+    parser.add_argument("--metric-k-max", type=int, default=400,
                         help="neighbour-list width; also the largest K in the RNX AUC and "
-                             "the rank horizon beyond which penalties are clamped")
+                             "the rank horizon beyond which penalties are clamped. 400 is "
+                             "measured, not guessed: on real umap-learn output at "
+                             "min_dist=0.0, k_max=100 clamped 40%% of ranks and reported "
+                             "trustworthiness 0.0323 too high, while 400 clamped 0.1%% and "
+                             "landed within 0.0001 of the exact value. Required width "
+                             "scales with island size, so check clamped_fraction in the "
+                             "output and raise this if it exceeds 0.05")
     parser.add_argument("--clusterer", default="kmeans", choices=["kmeans", "hdbscan"])
     parser.add_argument("--kmeans-k", type=int, default=25,
                         help="held identical across sizes, so ARI reflects the embedding")

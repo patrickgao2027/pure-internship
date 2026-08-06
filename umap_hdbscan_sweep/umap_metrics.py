@@ -343,6 +343,14 @@ def procrustes_disparity(source: np.ndarray, target: np.ndarray) -> float:
     once that freedom is removed. 0 means the two coordinate sets are the same shape;
     1 means the alignment explained nothing. This is scipy's normalisation (both inputs
     scaled to unit Frobenius norm) computed directly, to avoid scipy's copies at 1 M rows.
+
+    **Read this one with care on UMAP output.** Procrustes can only remove a *global*
+    similarity transform, but what differs between two UMAP fits is mostly where each
+    island got placed relative to the others -- and that placement is arbitrary, decided by
+    the random initialisation, not by the data. A measured example from the real-backend
+    run: two fits whose clusterings agreed at ARI 0.9989 scored procrustes disparity 0.93,
+    which reads as total disagreement. It is a genuine signal about global geometry and a
+    misleading one about whether the clustering moved. When the two disagree, believe ARI.
     """
     source = np.asarray(source, dtype=np.float64)
     target = np.asarray(target, dtype=np.float64)
