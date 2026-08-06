@@ -469,25 +469,46 @@ def print_report(payload: dict) -> None:
     print(row("probe transform (s)", [r["timing"]["probe_transform_seconds"] for r in results]))
     print(row("cluster (s)", [r["timing"]["cluster_seconds"] for r in results]))
 
+    # Annotation key used in labels below:
+    #   *  hand-coded from scratch (custom kNN / rank-lookup / SVD / contingency math)
+    #   ~  custom distance sampling + a single scipy call for the final statistic
+    #      (unmarked) thin sklearn / hdbscan API wrapper
+
     print("\n  -- embedding quality (2-D map vs the 16-D latent) --")
-    for name in ("trustworthiness", "continuity", "rnx_auc",
-                 "spearman_distance", "pearson_distance"):
-        print(row(name, [r["embedding_quality"].get(name) for r in results]))
-    print(row("procrustes vs ref", [r["vs_reference"]["procrustes_disparity"] for r in results]))
+    for name, label in (
+        ("trustworthiness",   "trustworthiness *"),
+        ("continuity",        "continuity *"),
+        ("rnx_auc",           "rnx_auc *"),
+        ("spearman_distance", "spearman_distance ~"),
+        ("pearson_distance",  "pearson_distance ~"),
+    ):
+        print(row(label, [r["embedding_quality"].get(name) for r in results]))
+    print(row("procrustes vs ref *", [r["vs_reference"]["procrustes_disparity"] for r in results]))
 
     print(f"\n  -- clustering agreement with the {sizes[-1]:,}-row reference --")
-    for name in ("adjusted_rand", "normalized_mutual_info", "adjusted_mutual_info", "jaccard"):
-        print(row(name, [r["vs_reference"][name] for r in results]))
+    for name, label in (
+        ("adjusted_rand",          "adjusted_rand"),
+        ("normalized_mutual_info", "normalized_mutual_info"),
+        ("adjusted_mutual_info",   "adjusted_mutual_info"),
+        ("jaccard",                "jaccard *"),
+    ):
+        print(row(label, [r["vs_reference"][name] for r in results]))
 
     print("\n  -- clustering agreement with the previous size --")
-    for name in ("adjusted_rand", "jaccard"):
-        print(row(name, [None if r["vs_previous"] is None else r["vs_previous"][name]
-                         for r in results]))
+    for name, label in (("adjusted_rand", "adjusted_rand"), ("jaccard", "jaccard *")):
+        print(row(label, [None if r["vs_previous"] is None else r["vs_previous"][name]
+                          for r in results]))
 
     print("\n  -- clustering quality --")
-    for name in ("n_clusters", "noise_fraction", "silhouette",
-                 "davies_bouldin", "calinski_harabasz", "dbcv"):
-        print(row(name, [r["cluster_quality"].get(name) for r in results]))
+    for name, label in (
+        ("n_clusters",        "n_clusters"),
+        ("noise_fraction",    "noise_fraction"),
+        ("silhouette",        "silhouette"),
+        ("davies_bouldin",    "davies_bouldin"),
+        ("calinski_harabasz", "calinski_harabasz"),
+        ("dbcv",              "dbcv"),
+    ):
+        print(row(label, [r["cluster_quality"].get(name) for r in results]))
 
     print(f"\n  -- converged at (within {payload['tolerance']} of the reference, and staying there) --")
     for name, size in payload["converged_at"].items():
@@ -506,6 +527,8 @@ def print_report(payload: dict) -> None:
               f"or read the vs-previous rows instead.")
     if unsettled:
         print(f"  Never converged: {', '.join(unsettled)}")
+    print(f"\n  * hand-coded from scratch  ~ custom sampling + scipy  "
+          f"(unmarked) sklearn / hdbscan API")
     print(rule + "\n")
 
 
