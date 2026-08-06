@@ -64,6 +64,7 @@ import polars as pl
 
 import clustering_metrics as metrics
 import sweep_core as core
+import umap_metrics as um
 
 
 def log(message: str) -> None:
@@ -111,7 +112,22 @@ def parse_args() -> argparse.Namespace:
                              "labelled by approximate_predict, so every locus still reaches "
                              "SigProfiler.")
     parser.add_argument("--predict-batch-size", type=int, default=5_000_000)
-    parser.add_argument("--sil-eval-rows", type=int, default=50_000)
+
+    # Metric tiers, named and defaulted to match umap_hdbscan_sweep/size_convergence.py so
+    # the numbers here sit in the same table as that sweep's without a footnote.
+    #   full  linear in rows          -> everything (Davies-Bouldin, Calinski-Harabasz)
+    #   knn   needs neighbour lists   -> --knn-rows  (trustworthiness, continuity, RNX)
+    #   pair  needs pairwise distance -> --pair-rows (silhouette, distance correlations)
+    parser.add_argument("--knn-rows", type=int, default=250_000)
+    parser.add_argument("--pair-rows", type=int, default=20_000)
+    parser.add_argument("--distance-pairs", type=int, default=20_000_000)
+    parser.add_argument("--metric-k", type=int, default=15,
+                        help="neighbourhood size for trustworthiness and continuity")
+    parser.add_argument("--metric-k-max", type=int, default=400,
+                        help="neighbour-list width and the rank horizon beyond which "
+                             "penalties are clamped. 400 is measured, not guessed (see "
+                             "size_convergence.py). Check clamped_fraction and raise it "
+                             "if that exceeds 0.05.")
     parser.add_argument("--agreement-rows", type=int, default=200_000)
     parser.add_argument("--agreement-reference", default=None,
                         help="Optional agreement_labels.npy from a stage-2 cell. Gives the "
@@ -120,6 +136,20 @@ def parse_args() -> argparse.Namespace:
                              "the same stage-0 dedup population.")
     parser.add_argument("--agreement-reference-label", default=None,
                         help="name for the reference in the summary (defaults to its path)")
+    parser.add_argument("--reference-latent", default=None,
+                        help="The 16-D baseline's stage-1 latent.npy, over the SAME dedup rows. "
+                             "Turns on the embedding-quality panel: trustworthiness, continuity, "
+                             "RNX AUC and distance correlations of this 2-D space against the "
+                             "16-D one. The baseline scores its 2-D UMAP against that same 16-D "
+                             "reference, so the two are directly comparable -- this is what makes "
+                             "'is the VAE's 2-D as faithful as UMAP's 2-D' an answerable question "
+                             "rather than a rhetorical one.")
+    parser.add_argument("--reference-coordinates", default=None,
+                        help="Optional analysis.parquet from the baseline cell, for Procrustes "
+                             "between its 2-D UMAP coordinates and this 2-D latent. Read the "
+                             "caveat in umap_metrics.procrustes_disparity: on UMAP output it is "
+                             "a genuine signal about global geometry and a misleading one about "
+                             "whether the clustering moved. When it and ARI disagree, believe ARI.")
 
     parser.add_argument("--expect-latent-dim", type=int, default=2)
     parser.add_argument("--allow-any-latent-dim", action="store_true",
@@ -177,6 +207,84 @@ def latent_statistics(space: np.ndarray, collapse_std: float = 1e-3) -> dict:
         "collapsed_dims": [int(index) for index, value in enumerate(stds) if value < collapse_std],
         "collapse_std_threshold": collapse_std,
         "rows_measured": int(sample.shape[0]),
+    }
+
+
+def quality_panel(
+    space: np.ndarray,
+    labels: np.ndarray,
+    dbcv: float | None,
+    pair_positions: np.ndarray,
+) -> dict:
+    """Internal-validity panel for one labelling of the clustering space.
+
+    Davies-Bouldin and Calinski-Harabasz come from ``umap_metrics.cluster_quality`` rather
+    than ``clustering_metrics.internal_metrics``, and the difference is not cosmetic: both
+    are linear (they only need cluster centroids) so they are computed on **every row**,
+    while ``internal_metrics`` evaluates all three on one 50k subsample because silhouette
+    forced it to. Silhouette genuinely is O(n^2) and still runs on ``pair_positions``.
+
+    Entropy and mean-WCSS have no equivalent in ``umap_metrics`` and are taken from
+    ``clustering_metrics`` directly, rather than by calling ``internal_metrics`` and
+    discarding four fifths of its output -- which would recompute silhouette a second time
+    on a different subsample and put two disagreeing values in the same JSON.
+    """
+    panel = um.cluster_quality(
+        space, labels,
+        silhouette_coordinates=space[pair_positions],
+        silhouette_labels=labels[pair_positions],
+    )
+    panel["dbcv"] = dbcv
+    entropy, entropy_normalized = metrics.cluster_size_entropy(labels)
+    panel["entropy"] = entropy
+    panel["entropy_normalized"] = entropy_normalized
+    panel["mean_wcss"] = metrics.mean_wcss(space, labels)
+    panel["n_points"] = int(labels.size)
+    return panel
+
+
+def embedding_quality(
+    reference_knn: np.ndarray,
+    reference_pair: np.ndarray,
+    space: np.ndarray,
+    knn_positions: np.ndarray,
+    pair_positions: np.ndarray,
+    args: argparse.Namespace,
+    use_gpu: bool,
+) -> dict:
+    """How faithfully this 2-D space reproduces the 16-D latent's neighbourhood structure.
+
+    This is the comparison the whole test turns on. The baseline pipeline scores its 2-D
+    UMAP against the 16-D latent it was built from; scoring this 2-D latent against the
+    *same* 16-D reference puts both on one axis, so "did dropping UMAP cost fidelity"
+    stops being a matter of opinion.
+
+    Note what is and is not being claimed. The 16-D latent is not ground truth -- it is
+    another lossy encoding of the same reads. It is used as the reference because it is the
+    richest representation both pipelines share, not because it is correct.
+
+    The two reference blocks arrive pre-materialised and already row-aligned with
+    ``space[knn_positions]`` and ``space[pair_positions]`` respectively. They are NOT
+    indexed again here: ``knn_positions`` and ``pair_positions`` are offsets into the full
+    population, so applying them to an array that has already been subset would silently
+    read the wrong rows -- or, when the subset is small enough, raise IndexError.
+    """
+    local = um.local_quality(
+        reference_knn, space[knn_positions],
+        k=args.metric_k, k_max=args.metric_k_max, use_gpu=use_gpu,
+    )
+    global_quality = um.distance_correlations(
+        reference_pair, space[pair_positions],
+        pairs=args.distance_pairs, seed=args.seed,
+    )
+    # Both helpers return a key called "rows", counting different tiers. A plain
+    # {**local, **global} lets the pair count silently overwrite the knn count and puts one
+    # number next to six metrics that were not computed on it, so they are renamed apart.
+    return {
+        **{key: value for key, value in local.items() if key != "rows"},
+        "knn_rows": local["rows"],
+        **{key: value for key, value in global_quality.items() if key != "rows"},
+        "pair_rows": global_quality["rows"],
     }
 
 
@@ -475,6 +583,52 @@ def main() -> int:
         log(f"     Either cap the fit:  --fit-rows {affordable // 1_000_000 * 1_000_000}")
         log(f"     or give it the card: GPU_TOTAL_GB=40 TRAINER_GPU_GB=0 (trainer must be idle)")
 
+    # Metric tiers. pair is drawn FROM knn, not independently, so the two tiers describe
+    # the same region of the space and a disagreement between them is about the metric
+    # rather than about which rows each happened to see. Same construction as
+    # size_convergence.py.
+    tier_rng = np.random.default_rng(args.seed + 1)
+    knn_positions = np.sort(tier_rng.choice(
+        total_rows, size=min(args.knn_rows, total_rows), replace=False))
+    pair_positions = np.sort(tier_rng.choice(
+        knn_positions, size=min(args.pair_rows, knn_positions.size), replace=False))
+    log(f"Metric tiers: full {total_rows:,} / knn {knn_positions.size:,} / "
+        f"pair {pair_positions.size:,}")
+
+    reference_latent = None
+    if args.reference_latent:
+        reference_path = Path(args.reference_latent).resolve()
+        reference_latent = np.load(reference_path, mmap_mode="r")
+        if reference_latent.shape[0] != total_rows:
+            raise SystemExit(
+                f"--reference-latent has {reference_latent.shape[0]:,} rows but this run has "
+                f"{total_rows:,}. The embedding-quality metrics compare the two spaces ROW BY "
+                f"ROW, so they are only meaningful when both stage-1 runs used the same stage-0 "
+                f"dedup manifest. Re-run stage 1 against {embed_summary.get('dedup_manifest')}."
+            )
+        log(f"Embedding-quality reference: {reference_path} "
+            f"({reference_latent.shape[0]:,} x {reference_latent.shape[1]})")
+        # Materialise only the rows the metrics touch -- the reference is the 16-D latent,
+        # which at cohort scale is ~10 GB on disk and there is no reason to hold it all.
+        reference_knn = np.asarray(reference_latent[knn_positions], dtype=np.float32)
+        reference_pair = np.asarray(reference_latent[pair_positions], dtype=np.float32)
+    else:
+        reference_knn = reference_pair = None
+        log("No --reference-latent: skipping trustworthiness / continuity / RNX / distance "
+            "correlations. Pass the 16-D baseline's stage-1 latent.npy to enable them.")
+
+    reference_coordinates = None
+    if args.reference_coordinates:
+        coordinates_path = Path(args.reference_coordinates).resolve()
+        frame = pl.read_parquet(coordinates_path, columns=["umap_1", "umap_2"])
+        if frame.height != total_rows:
+            raise SystemExit(
+                f"--reference-coordinates has {frame.height:,} rows but this run has "
+                f"{total_rows:,}; Procrustes is row-aligned and needs the same dedup population."
+            )
+        reference_coordinates = frame.to_numpy().astype(np.float32, copy=False)
+        log(f"Procrustes reference: {coordinates_path}")
+
     agreement_rows = min(args.agreement_rows, total_rows)
     agreement_index = np.sort(
         np.random.default_rng(args.seed).choice(total_rows, size=agreement_rows, replace=False)
@@ -509,13 +663,13 @@ def main() -> int:
                 # exists). The saved labels are all that comparison needs, so backfill it
                 # rather than making the user delete finished cells to get the number.
                 if reference_labels is not None and already.get("agreement_vs_reference") is None:
-                    already["agreement_vs_reference"] = metrics.clustering_agreement(
+                    already["agreement_vs_reference"] = um.label_agreement(
                         reference_labels, saved
                     )
                     metrics_path.write_text(json.dumps(already, indent=2))
             cells.append(already)
             log(f"  [{config.label()}] already complete, skipping"
-                + (f" (backfilled ARI_vs_ref={already['agreement_vs_reference']['ari']:.4f})"
+                + (f" (backfilled ARI_vs_ref={already['agreement_vs_reference']['adjusted_rand']:.4f})"
                    if already.get("agreement_vs_reference") else ""))
             continue
 
@@ -532,10 +686,22 @@ def main() -> int:
                 fitted, space, indices, args.predict_batch_size
             )
 
-            panel = metrics.internal_metrics(
-                space, labels, eval_rows=args.sil_eval_rows, seed=args.seed
-            )
-            panel["relative_validity"] = fitted.dbcv
+            panel = quality_panel(space, labels, fitted.dbcv, pair_positions)
+
+            fidelity = None
+            if reference_knn is not None:
+                fidelity_started = perf_counter()
+                fidelity = embedding_quality(
+                    reference_knn, reference_pair, space,
+                    knn_positions, pair_positions, args, use_gpu,
+                )
+                # Both scores are optimistic by an amount that grows with this, so surface
+                # it rather than leaving it in the JSON for someone to find later.
+                if fidelity["clamped_fraction"] > 0.05:
+                    log(f"    !! {fidelity['clamped_fraction'] * 100:.1f}% of neighbour ranks "
+                        f"fell outside k_max={fidelity['k_max']}; trustworthiness and "
+                        f"continuity are optimistic. Raise --metric-k-max.")
+                fidelity["seconds"] = round(perf_counter() - fidelity_started, 1)
 
             analysis_path = cell_dir / "analysis.parquet"
             write_analysis_parquet(analysis_path, context, labels, probabilities, space)
@@ -546,9 +712,19 @@ def main() -> int:
 
             versus_reference = None
             if reference_labels is not None:
-                versus_reference = metrics.clustering_agreement(
+                # label_agreement, not clustering_agreement: it adds pair-counting Jaccard
+                # alongside ARI/NMI/AMI. Jaccard is not chance-corrected and so is the more
+                # pessimistic of the two -- a high ARI with a low Jaccard means the runs
+                # mostly agree on what to keep APART, which at 30-50% noise is exactly the
+                # failure mode worth catching.
+                versus_reference = um.label_agreement(
                     reference_labels, labels[agreement_index]
                 )
+            if reference_coordinates is not None:
+                versus_reference = versus_reference or {}
+                versus_reference["procrustes_disparity"] = round(um.procrustes_disparity(
+                    space[knn_positions], reference_coordinates[knn_positions]
+                ), 5)
 
             plot_path = None
             if args.plot and space.shape[1] == 2:
@@ -576,6 +752,7 @@ def main() -> int:
                 "fit_rows": int(fit_space.shape[0]),
                 "scale": args.scale,
                 "metrics": panel,
+                "embedding_quality": fidelity,
                 "dbcv": fitted.dbcv,
                 "analysis_path": str(analysis_path),
                 "agreement_labels_path": str(agreement_path),
@@ -593,7 +770,11 @@ def main() -> int:
             log(f"  [{config.label()}] {panel['n_clusters']} clusters  "
                 f"noise={panel['noise_fraction']:.3f}  dbcv={fitted.dbcv}  "
                 f"sil={panel['silhouette']}"
-                + (f"  ARI_vs_ref={versus_reference['ari']:.4f}" if versus_reference else "")
+                + (f"  ARI_vs_ref={versus_reference['adjusted_rand']:.4f}"
+                   if versus_reference and "adjusted_rand" in versus_reference else "")
+                + (f"  trust={fidelity['trustworthiness']:.4f}"
+                   f" cont={fidelity['continuity']:.4f}"
+                   f" rnx={fidelity['rnx_auc']:.4f}" if fidelity else "")
                 + f"  ({payload['seconds']}s)")
         except Exception as exc:
             payload = {
@@ -619,9 +800,11 @@ def main() -> int:
     # happened to the 16-D sweep. Fall back to silhouette and say which was used.
     by_dbcv = [cell for cell in ok
                if cell.get("dbcv") is not None and cell["metrics"]["n_clusters"] >= 2]
+    # cluster_quality reports an undefined metric as None, not NaN -- np.isfinite(None)
+    # raises, so this must be an explicit None check.
     by_silhouette = [cell for cell in ok
                      if cell["metrics"]["n_clusters"] >= 2
-                     and np.isfinite(cell["metrics"].get("silhouette", float("nan")))]
+                     and cell["metrics"].get("silhouette") is not None]
     if by_dbcv:
         best, selection_metric = max(by_dbcv, key=lambda cell: cell["dbcv"]), "dbcv"
     elif by_silhouette:
@@ -638,9 +821,9 @@ def main() -> int:
             if cell["cell"] in agreement_labels:
                 agreement_vs_best.append(
                     {"cell": cell["cell"],
-                     **metrics.clustering_agreement(reference, agreement_labels[cell["cell"]])}
+                     **um.label_agreement(reference, agreement_labels[cell["cell"]])}
                 )
-        agreement_vs_best.sort(key=lambda entry: entry["ari"], reverse=True)
+        agreement_vs_best.sort(key=lambda entry: entry["adjusted_rand"], reverse=True)
 
     summary = {
         "experiment": "vae_latent_2d_no_umap",
@@ -687,7 +870,8 @@ def main() -> int:
             f"noise={best['metrics']['noise_fraction']:.3f}  "
             f"silhouette={best['metrics']['silhouette']}")
         if best.get("agreement_vs_reference"):
-            log(f"  ARI vs the 16-D+UMAP baseline: {best['agreement_vs_reference']['ari']:.4f}")
+            log(f"  ARI vs the 16-D+UMAP baseline: "
+                f"{best['agreement_vs_reference']['adjusted_rand']:.4f}")
     if stats["collapsed_dims"]:
         log(f"REMINDER: dimension(s) {stats['collapsed_dims']} were collapsed -- these clusters "
             f"live on a line, not a plane.")

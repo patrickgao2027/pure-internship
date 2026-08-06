@@ -207,14 +207,75 @@ python umap_hdbscan_sweep/stage2_sweep.py --embed-dir <run>/stage1_embed --outpu
 
 That completes a 2×2 over {2-D, 16-D} × {UMAP, no UMAP}.
 
+## The metrics
+
+Three panels per cell, all from modules already in this repo — nothing is reimplemented, so
+the numbers sit in the same table as the size sweep's.
+
+**Internal validity** (`metrics`) — one labelling, scored on its own:
+
+| | source | computed on |
+|---|---|---|
+| Davies–Bouldin, Calinski–Harabasz | `umap_metrics.cluster_quality` | **every row** |
+| silhouette | same | `--pair-rows` (20k) — it is O(n²) |
+| DBCV (`relative_validity_`) | the fitted clusterer | fit set |
+| cluster-size entropy + normalised | `clustering_metrics` | every row |
+| mean WCSS per point | `clustering_metrics` | every row |
+| n_clusters, noise fraction | | every row |
+
+DB and CH come from `umap_metrics.cluster_quality` rather than
+`clustering_metrics.internal_metrics`, and that is not cosmetic: both are linear (they only
+need centroids) so they run on **all** rows, whereas `internal_metrics` evaluates all three
+on one 50k subsample because silhouette forced it to.
+
+**Embedding fidelity** (`embedding_quality`) — the panel that was missing, and the one that
+answers the actual research question:
+
+| | |
+|---|---|
+| trustworthiness | points close in 2-D that are not close in 16-D |
+| continuity | points close in 16-D that the 2-D space pushed apart |
+| RNX AUC, QNX@k | the two above generalised over every neighbourhood size at once |
+| Spearman / Pearson distance | rank and linear correlation of pairwise distance, 16-D vs 2-D |
+| Procrustes disparity | geometric disagreement with the baseline's 2-D UMAP coordinates |
+
+These need `--reference-latent` — the **16-D baseline's** `stage1_embed/latent.npy`, which
+the runner locates automatically. That is the point: the baseline scores its 2-D *UMAP*
+against that same 16-D latent, so both 2-D spaces are measured against one common reference
+and "is the VAE's own 2-D as faithful as UMAP's 2-D" becomes a number instead of an
+argument. The 16-D latent is not ground truth — it is another lossy encoding of the same
+reads — but it is the richest representation the two pipelines share.
+
+Row alignment is load-bearing here: the comparison is row by row, which holds only because
+both stage 1s consumed the same stage-0 dedup manifest. The script refuses to run if the
+row counts differ rather than quietly comparing unrelated reads.
+
+**Watch `clamped_fraction`.** Neighbour ranks beyond `k_max` are clamped and so
+under-penalised, making trustworthiness and continuity optimistic by an amount that grows
+with it. Above 0.05 the run says so and tells you to raise `--metric-k-max`. 400 is
+measured, not guessed: at 100, real umap-learn output clamped 40 % of ranks and read 0.032
+too high.
+
+**Agreement** (`agreement_vs_reference`) — ARI, NMI, AMI and **pair-counting Jaccard**
+against the baseline's labels, via `umap_metrics.label_agreement`. Jaccard is the addition
+worth having: it is not chance-corrected, so a high ARI beside a low Jaccard means the two
+runs mostly agree about what to keep *apart* — exactly the failure mode to catch at 30–50 %
+noise. Noise (−1) is carried as an ordinary label, so a run that calls 90 % of the cohort
+noise cannot score well on the remainder.
+
+On Procrustes, heed `umap_metrics`' own warning: two fits agreeing at ARI 0.9989 scored 0.93
+disparity, because what differs between UMAP runs is mostly where each island landed, and
+that is decided by initialisation rather than by data. When Procrustes and ARI disagree,
+believe ARI.
+
 ## Reading the result
 
 `latent2d_summary.json` at the output root; one `metrics.json`, `analysis.parquet`,
 `latent_clusters.png` and SigProfiler directory per cell.
 
-- **`agreement_vs_reference.ari`** — the headline: agreement with the 16-D + UMAP baseline
-  on a fixed 200k-locus subsample. Valid only when `--seed`, `--agreement-rows` and the
-  stage-0 dedup population all match the run that produced the reference (which is why
+- **`agreement_vs_reference.adjusted_rand`** — the headline: agreement with the 16-D + UMAP
+  baseline on a fixed 200k-locus subsample. Valid only when `--seed`, `--agreement-rows` and
+  the stage-0 dedup population all match the run that produced the reference (which is why
   stage 0 is shared). It backfills onto already-complete cells, so you can add
   `AGREEMENT_REFERENCE=` to a finished run without re-clustering.
 - **`selection_metric`** — cuML does not expose `relative_validity_`, so DBCV is `null` on

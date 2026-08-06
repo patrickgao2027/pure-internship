@@ -87,6 +87,19 @@ if [ -z "${AGREEMENT_REFERENCE:-}" ] \
 fi
 AGREEMENT_REFERENCE="${AGREEMENT_REFERENCE:-}"
 
+# The 16-D latent both pipelines are scored against. Row-aligned with this run only
+# because both stage 1s consumed the same stage-0 dedup manifest -- which is exactly
+# what reusing DEDUP_DIR below guarantees.
+if [ -z "${REFERENCE_LATENT:-}" ] && [ -f "$BASELINE_ROOT/stage1_embed/latent.npy" ]; then
+    REFERENCE_LATENT="$BASELINE_ROOT/stage1_embed/latent.npy"
+fi
+REFERENCE_LATENT="${REFERENCE_LATENT:-}"
+if [ -z "${REFERENCE_COORDINATES:-}" ] \
+   && [ -f "$BASELINE_ROOT/stage2_sweep/$BASELINE_CELL/analysis.parquet" ]; then
+    REFERENCE_COORDINATES="$BASELINE_ROOT/stage2_sweep/$BASELINE_CELL/analysis.parquet"
+fi
+REFERENCE_COORDINATES="${REFERENCE_COORDINATES:-}"
+
 # Reuse the baseline's dedup when it is there; otherwise this run makes its own.
 if [ -z "${DEDUP_DIR:-}" ] && [ -f "$BASELINE_ROOT/stage0_dedup/dedup_manifest.json" ]; then
     DEDUP_DIR="$BASELINE_ROOT/stage0_dedup"
@@ -178,7 +191,16 @@ SCALE="${SCALE:-none}"
 FIT_ROWS="${FIT_ROWS:-all}"
 PREDICT_BATCH="${PREDICT_BATCH:-5000000}"
 EMBED_BATCH="${EMBED_BATCH:-262144}"
-SIL_EVAL_ROWS="${SIL_EVAL_ROWS:-50000}"
+# Metric tiers, matching umap_hdbscan_sweep/size_convergence.py exactly so the numbers
+# land in the same table as that sweep's. knn = trustworthiness/continuity/RNX,
+# pair = silhouette + distance correlations (both need pairwise distances).
+KNN_ROWS="${KNN_ROWS:-250000}"
+PAIR_ROWS="${PAIR_ROWS:-20000}"
+DISTANCE_PAIRS="${DISTANCE_PAIRS:-20000000}"
+METRIC_K="${METRIC_K:-15}"
+# 400 is measured, not guessed: at k_max=100 real umap-learn output clamped 40% of
+# ranks and reported trustworthiness 0.032 too high. Watch clamped_fraction.
+METRIC_K_MAX="${METRIC_K_MAX:-400}"
 PLOT_ROWS="${PLOT_ROWS:-200000}"
 
 # ── GPU budget when sharing the card ────────────────────────────────────────
@@ -303,6 +325,8 @@ stage2_cluster() {
     [ "$FORCE_CPU"      = "1" ] && flags+=(--force-cpu)
     [ -n "$AGREEMENT_REFERENCE" ] && flags+=(--agreement-reference "$AGREEMENT_REFERENCE"
                                              --agreement-reference-label "$BASELINE_CELL")
+    [ -n "$REFERENCE_LATENT" ]    && flags+=(--reference-latent "$REFERENCE_LATENT")
+    [ -n "$REFERENCE_COORDINATES" ] && flags+=(--reference-coordinates "$REFERENCE_COORDINATES")
 
     uvv_log "===== BEGIN stage 2: HDBSCAN on the 2-D latent (no UMAP) ====="
     python "$LATENT2D_DIR/latent2d_cluster.py" \
@@ -315,7 +339,11 @@ stage2_cluster() {
         --scale "$SCALE" \
         --fit-rows "$FIT_ROWS" \
         --predict-batch-size "$PREDICT_BATCH" \
-        --sil-eval-rows "$SIL_EVAL_ROWS" \
+        --knn-rows "$KNN_ROWS" \
+        --pair-rows "$PAIR_ROWS" \
+        --distance-pairs "$DISTANCE_PAIRS" \
+        --metric-k "$METRIC_K" \
+        --metric-k-max "$METRIC_K_MAX" \
         --agreement-rows "$AGREEMENT_ROWS" \
         --plot-rows "$PLOT_ROWS" \
         --seed "$SEED" \
@@ -360,7 +388,9 @@ main() {
         echo "  HDBSCAN     : mcs=$MIN_CLUSTER_SIZE  min_samples=$MIN_SAMPLES"
         echo "                selection=$SELECTION_METHOD  epsilon=$SELECTION_EPSILON  scale=$SCALE"
         echo "  fit rows    : $FIT_ROWS   predict batch: $PREDICT_BATCH"
+        echo "  metric tiers: full / knn $KNN_ROWS / pair $PAIR_ROWS   k=$METRIC_K k_max=$METRIC_K_MAX"
         echo "  baseline ARI: ${AGREEMENT_REFERENCE:-<none -- no 16-D reference found>}"
+        echo "  16-D ref    : ${REFERENCE_LATENT:-<none -- embedding-quality panel disabled>}"
         echo "  SigProfiler : $([ "$NO_SIGPROFILER" = "1" ] && echo disabled || echo "every cell (COSMIC v$COSMIC_VERSION, $GENOME_BUILD)")"
         ;;
     esac
@@ -405,6 +435,8 @@ else
          MIN_CLUSTER_SIZE='$MIN_CLUSTER_SIZE' MIN_SAMPLES='$MIN_SAMPLES' \
          SELECTION_METHOD='$SELECTION_METHOD' SELECTION_EPSILON='$SELECTION_EPSILON' \
          SCALE='$SCALE' GPU_TOTAL_GB='$GPU_TOTAL_GB' TRAINER_GPU_GB='$TRAINER_GPU_GB' \
+         REFERENCE_LATENT='$REFERENCE_LATENT' REFERENCE_COORDINATES='$REFERENCE_COORDINATES' \
+         KNN_ROWS='$KNN_ROWS' PAIR_ROWS='$PAIR_ROWS' METRIC_K_MAX='$METRIC_K_MAX' \
          NO_RESUME='$NO_RESUME' NO_SIGPROFILER='$NO_SIGPROFILER' \
          NO_PLOT='$NO_PLOT' FORCE_CPU='$FORCE_CPU' AGREEMENT_REFERENCE='$AGREEMENT_REFERENCE' \
          NO_TMUX=1 bash '${BASH_SOURCE[0]}'"
