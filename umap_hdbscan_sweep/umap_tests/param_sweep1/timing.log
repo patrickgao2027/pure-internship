@@ -1,0 +1,87 @@
+[gpu] device 47.3 GB total, 46.8 GB free (0.4 GB held by other processes); this stage wants 24.0 GB
+[gpu_budget] cap 24.0 GB of 47.27 GB = torch 2.4 GB (fraction 0.0508) + rmm pool 21.6 GB
+[15:51:01] latent.npy: 157,501,580 rows x 16 dims
+[15:51:01] 9 configs x 1 replicates = 9 fits at 5,000,000 rows
+[15:51:01]     nn15_md0.0_nc2
+[15:51:01]     nn15_md0.0_nc2_sp2
+[15:51:01]     nn15_md0.1_nc2
+[15:51:01]     nn15_md0.1_nc2_sp2
+[15:51:01]     nn15_md0.25_nc2
+[15:51:01]     nn15_md0.25_nc2_sp2
+[15:51:01]     nn15_md0.0_nc2_rs0.5
+[15:51:01]     nn15_md0.0_nc2_rs2
+[15:51:01]     nn15_md0.0_nc2_som0.5
+[15:51:05] materialising the probe latents ...
+[15:51:06] tiers: probe 1,000,000 / cluster 1,000,000 / knn 50,000 / pair 20,000
+[15:51:06] === replicate 1/1 (5,000,000 rows, umap seed 42) ===
+[15:51:06]   nn15_md0.0_nc2 ...
+[15:55:01]     WARNING: 16.8% of ranks fell outside k_max=5000; raise --metric-k-max or lower --knn-rows
+[15:55:01]     fit 118s  transform 22s  hdbscan 21s  metrics 71s  |  539 clusters, 14% noise, rnx 0.1799
+[15:55:01]     cell 1/9, elapsed 4 min, eta 32 min
+[15:55:01]   nn15_md0.0_nc2_sp2 ...
+[15:58:50]     WARNING: 17.4% of ranks fell outside k_max=5000; raise --metric-k-max or lower --knn-rows
+[15:58:50]     fit 118s  transform 22s  hdbscan 20s  metrics 67s  |  573 clusters, 15% noise, rnx 0.1810
+[15:58:50]     cell 2/9, elapsed 8 min, eta 28 min
+[15:58:50]   nn15_md0.1_nc2 ...
+[16:02:41]     WARNING: 17.9% of ranks fell outside k_max=5000; raise --metric-k-max or lower --knn-rows
+[16:02:41]     fit 118s  transform 22s  hdbscan 21s  metrics 67s  |  382 clusters, 14% noise, rnx 0.1749
+[16:02:41]     cell 3/9, elapsed 12 min, eta 23 min
+[16:02:41]   nn15_md0.1_nc2_sp2 ...
+[16:06:31]     WARNING: 18.2% of ranks fell outside k_max=5000; raise --metric-k-max or lower --knn-rows
+[16:06:31]     fit 118s  transform 22s  hdbscan 20s  metrics 67s  |  373 clusters, 12% noise, rnx 0.1765
+[16:06:31]     cell 4/9, elapsed 16 min, eta 19 min
+[16:06:31]   nn15_md0.25_nc2 ...
+[16:10:20]     WARNING: 20.4% of ranks fell outside k_max=5000; raise --metric-k-max or lower --knn-rows
+[16:10:20]     fit 118s  transform 22s  hdbscan 20s  metrics 67s  |  178 clusters, 12% noise, rnx 0.1605
+[16:10:20]     cell 5/9, elapsed 19 min, eta 15 min
+[16:10:20]   nn15_md0.25_nc2_sp2 ...
+[16:14:10]     WARNING: 20.0% of ranks fell outside k_max=5000; raise --metric-k-max or lower --knn-rows
+[16:14:10]     fit 118s  transform 22s  hdbscan 20s  metrics 67s  |  256 clusters, 13% noise, rnx 0.1670
+[16:14:10]     cell 6/9, elapsed 23 min, eta 12 min
+[16:14:10]   nn15_md0.0_nc2_rs0.5 ...
+[16:18:01]     WARNING: 17.6% of ranks fell outside k_max=5000; raise --metric-k-max or lower --knn-rows
+[16:18:01]     fit 118s  transform 22s  hdbscan 21s  metrics 67s  |  444 clusters, 15% noise, rnx 0.1773
+[16:18:01]     cell 7/9, elapsed 27 min, eta 8 min
+[16:18:01]   nn15_md0.0_nc2_rs2 ...
+[16:22:02]     WARNING: 16.4% of ranks fell outside k_max=5000; raise --metric-k-max or lower --knn-rows
+[16:22:02]     fit 118s  transform 22s  hdbscan 21s  metrics 77s  |  622 clusters, 13% noise, rnx 0.1816
+[16:22:02]     cell 8/9, elapsed 31 min, eta 4 min
+[16:22:02]   nn15_md0.0_nc2_som0.5 ...
+[16:26:11]     WARNING: 17.0% of ranks fell outside k_max=5000; raise --metric-k-max or lower --knn-rows
+[16:26:11]     fit 124s  transform 23s  hdbscan 22s  metrics 76s  |  530 clusters, 14% noise, rnx 0.1787
+[16:26:11]     cell 9/9, elapsed 35 min, eta 0 min
+[16:26:11] === aggregating across replicates ===
+[16:26:11] wrote /home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests/param_sweep1/timing/parameter_sweep.json
+
+======================================================================================================================
+UMAP size-independent parameter sweep -- fit 5,000,000 rows, 1 replicates, n_neighbors pinned at 15
+======================================================================================================================
+  config                       rnx_auc     trust  spearman  ARI_seed   ARI_min  clusters    noise%      dbcv      silh
+  --------------------------------------------------------------------------------------------------------------------
+  nn15_md0.0_nc2                0.1799    0.9770    0.2013        --        --  539.0000   13.9830        --    0.3460
+  nn15_md0.0_nc2_sp2            0.1810    0.9769    0.1890        --        --  573.0000   15.4630        --    0.2744
+  nn15_md0.1_nc2                0.1749    0.9742    0.1973        --        --  382.0000   13.5340        --    0.2395
+  nn15_md0.1_nc2_sp2            0.1765    0.9748    0.1884        --        --  373.0000   11.7820        --    0.1741
+  nn15_md0.25_nc2               0.1605    0.9679    0.1915        --        --  178.0000   11.5770        --    0.0580
+  nn15_md0.25_nc2_sp2           0.1670    0.9707    0.1862        --        --  256.0000   12.9740        --    0.0319
+  nn15_md0.0_nc2_rs0.5          0.1773    0.9743    0.2074        --        --  444.0000   14.6920        --    0.2583
+  nn15_md0.0_nc2_rs2            0.1816    0.9789    0.1947        --        --  622.0000   12.7870        --    0.4118
+  nn15_md0.0_nc2_som0.5         0.1787    0.9761    0.1960        --        --  530.0000   14.1840        --    0.3113
+
+  -- replicate-to-replicate spread (std across seeds) --
+  config                       rnx_std trust_std  clusters_std   noise_std
+  nn15_md0.0_nc2                    --        --            --          --
+  nn15_md0.0_nc2_sp2                --        --            --          --
+  nn15_md0.1_nc2                    --        --            --          --
+  nn15_md0.1_nc2_sp2                --        --            --          --
+  nn15_md0.25_nc2                   --        --            --          --
+  nn15_md0.25_nc2_sp2               --        --            --          --
+  nn15_md0.0_nc2_rs0.5              --        --            --          --
+  nn15_md0.0_nc2_rs2                --        --            --          --
+  nn15_md0.0_nc2_som0.5             --        --            --          --
+
+  worst clamped_fraction 20.43%  (TOO HIGH -- raise --metric-k-max)
+
+  -- verdict --
+  best fidelity (rnx_auc):  nn15_md0.0_nc2_rs2  (0.1816)
+  no stability numbers -- rerun with --seeds >= 2 before trusting any of this

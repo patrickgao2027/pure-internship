@@ -243,8 +243,18 @@ def train_regression(
     batch_size: int,
     learning_rate: float,
     device: torch.device,
+    checkpoint_every: int | None = None,
+    on_checkpoint=None,
 ) -> list[float]:
-    """MSE onto cuML's embedding, in cuML's own coordinate units. Both tensors on device."""
+    """MSE onto cuML's embedding, in cuML's own coordinate units. Both tensors on device.
+
+    ``on_checkpoint(step, encoder)`` fires every ``checkpoint_every`` steps when both are
+    given, and is otherwise never touched -- with the defaults this function behaves exactly
+    as it did before the hook existed. It lets a caller trace quality *during* training
+    rather than re-running the whole thing at several step budgets, which is what turns
+    "how many steps are enough" from a grid axis into a free by-product. The callback is
+    expected to flip the encoder to eval mode, so training mode is restored after it returns.
+    """
     optimiser = torch.optim.Adam(encoder.parameters(), lr=learning_rate)
     schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, T_max=steps)
     n_rows = X.shape[0]
@@ -260,6 +270,9 @@ def train_regression(
         if step % max(1, steps // 20) == 0 or step == steps - 1:
             history.append(round(float(loss.item()), 6))
             log(f"    regress step {step + 1}/{steps}  mse {loss.item():.6f}")
+        if on_checkpoint is not None and checkpoint_every and (step + 1) % checkpoint_every == 0:
+            on_checkpoint(step + 1, encoder)
+            encoder.train()
     return history
 
 
@@ -278,6 +291,8 @@ def train_umap_loss(
     repulsion_strength: float,
     device: torch.device,
     eps: float = 1e-4,
+    checkpoint_every: int | None = None,
+    on_checkpoint=None,
 ) -> list[float]:
     """UMAP cross-entropy, ported from ``lmcinnes/umap``'s ``UMAPModel._umap_loss``.
 
@@ -303,6 +318,15 @@ def train_umap_loss(
     **Where the input rows come from.** Upstream's ``tf.data`` pipeline gathers ``X`` rows
     for each edge; here ``X`` is already resident on the GPU, so the gather is a direct
     index. No behavioural difference.
+
+    ``checkpoint_every`` / ``on_checkpoint`` behave exactly as in ``train_regression``: off
+    by default, and when supplied they only observe the encoder mid-training.
+
+    ``edge_cumsum`` should be **float64**. Weights are O(0.5) each, so a float32 running sum
+    stops advancing past ~1.7e7 (the 24-bit mantissa) and every draw beyond that point lands
+    on the same edge. That threshold is already crossed by a 5 M-row graph at
+    ``n_neighbors=15`` (~3.7e7 edges), so the caller building this tensor is responsible for
+    the dtype -- ``torch.rand(...) * total_weight`` then promotes the draw to match.
 
     Negative sampling itself now matches upstream exactly: ``embedding_from`` repeated
     ``negative_sample_rate`` times and shuffled, so negative partners come from the current
@@ -374,6 +398,9 @@ def train_umap_loss(
             log(f"    umap  step {step + 1}/{steps}  loss {loss.item():.4f} "
                 f"(attract {attraction_term.sum().item() / batch_size:.4f}, "
                 f"repel {repellant_term.sum().item() / (batch_size * negative_sample_rate):.4f})")
+        if on_checkpoint is not None and checkpoint_every and (step + 1) % checkpoint_every == 0:
+            on_checkpoint(step + 1, encoder)
+            encoder.train()
     return history
 
 
@@ -527,7 +554,10 @@ def main() -> int:
             f"(weight min {weight_np.min():.4f}, max {weight_np.max():.4f})")
         edge_head = torch.from_numpy(head_np).to(device)
         edge_tail = torch.from_numpy(tail_np).to(device)
-        edge_cumsum = torch.cumsum(torch.from_numpy(weight_np).to(device), 0)
+        # float64: a float32 running sum saturates at ~1.7e7, which a 5 M-row nn=15 graph
+        # (~3.7e7 edges) already exceeds -- every draw past that point would resolve to the
+        # same edge and most of the graph would never be sampled.
+        edge_cumsum = torch.cumsum(torch.from_numpy(weight_np).to(device).double(), 0)
 
         learning_rate = args.umap_learning_rate if args.mode == "hybrid" else args.learning_rate
         log(f"training: UMAP cross-entropy, {args.umap_steps:,} steps, lr={learning_rate}")
