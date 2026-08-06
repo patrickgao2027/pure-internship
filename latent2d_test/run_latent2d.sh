@@ -135,6 +135,7 @@ KL_WEIGHT="${KL_WEIGHT:-0.01}"
 # The decoder is built symmetrically, so this deepens both halves.
 HIDDEN_DIMS="${HIDDEN_DIMS:-256,128,64,16}"
 
+DECODE_WORKERS="${DECODE_WORKERS:-8}"
 BATCH_SIZE="${BATCH_SIZE:-32768}"
 LEARNING_RATE="${LEARNING_RATE:-1e-3}"
 EPOCH_CEILING="${EPOCH_CEILING:-40}"
@@ -264,7 +265,7 @@ stage_train() {
     BATCH_SIZE="$BATCH_SIZE" LEARNING_RATE="$LEARNING_RATE" \
     EPOCH_CEILING="$EPOCH_CEILING" EPOCH_SHARDS="$EPOCH_SHARDS" PATIENCE="$PATIENCE" \
     INPUT_DROPOUT="$INPUT_DROPOUT" HIDDEN_DROPOUT="$HIDDEN_DROPOUT" \
-    GPU_TOTAL_GB="$GPU_TOTAL_GB" \
+    GPU_TOTAL_GB="$GPU_TOTAL_GB" DECODE_WORKERS="$DECODE_WORKERS" \
         bash "$EARLY_STOPPING_DIR/scripts/tmux_train_multi.sh"
     CHECKPOINT="$(resolve_trained_checkpoint)"
     uvv_log "===== END train -> ${CHECKPOINT:-<none found>} ====="
@@ -395,6 +396,7 @@ main() {
         ;;
     esac
     echo "  GPU split   : ${GPU_TOTAL_GB} GB total = ${TRAINER_GPU_GB} trainer + ${SWEEP_GPU_GB} this job"
+    echo "  decode workers: $DECODE_WORKERS"
     echo "  threads     : $UVV_THREADS_PER_WORKER"
     echo "  seed        : $SEED"
     uvv_rule
