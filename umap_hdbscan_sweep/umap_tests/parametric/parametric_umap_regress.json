@@ -1,0 +1,91 @@
+{
+  "run_timestamp": "2026-08-05T17:55:53.384075+00:00",
+  "mode": "regress",
+  "total_rows": 157501580,
+  "latent_dim": 16,
+  "umap_config": {
+    "n_neighbors": 15,
+    "min_dist": 0.0,
+    "n_components": 2,
+    "metric": "euclidean",
+    "seed": 42,
+    "n_epochs": 200
+  },
+  "encoder": {
+    "hidden": [
+      256,
+      256,
+      128
+    ],
+    "parameters": 103298,
+    "regress_steps": 15000,
+    "umap_steps": 0,
+    "batch_size": 16384,
+    "negative_sample_rate": null
+  },
+  "fit_rows": 5000000,
+  "probe_rows": 200000,
+  "timing": {
+    "umap_fit_seconds": 115.13,
+    "encoder_train_seconds": 10.02,
+    "true_transform_probe_seconds": 4.28,
+    "true_transform_full_cohort_minutes": 54.4,
+    "parametric_probe_seconds": 0.005,
+    "parametric_full_cohort_minutes": 0.06,
+    "inference_speedup": 944.6,
+    "end_to_end_current_minutes": 56.4,
+    "end_to_end_parametric_minutes": 2.1
+  },
+  "quality_procrustes_aligned": {
+    "mean_error_raw": 0.34035,
+    "median_error_raw": 0.20066,
+    "p95_error_raw": 0.87556,
+    "embedding_std": 6.18823,
+    "mean_error_in_std": 0.055,
+    "median_error_in_std": 0.03243,
+    "p95_error_in_std": 0.14149,
+    "knn_overlap": 0.05542
+  },
+  "quality_raw": {
+    "mean_error_raw": 0.34025,
+    "median_error_raw": 0.20067,
+    "p95_error_raw": 0.87569,
+    "embedding_std": 6.18823,
+    "mean_error_in_std": 0.05498,
+    "median_error_in_std": 0.03243,
+    "p95_error_in_std": 0.14151,
+    "knn_overlap": 0.05542
+  },
+  "loss_history": {
+    "regression_mse": [
+      38.241615,
+      0.772053,
+      0.533129,
+      0.454481,
+      0.405622,
+      0.38166,
+      0.369854,
+      0.325052,
+      0.356814,
+      0.392905,
+      0.315647,
+      0.326161,
+      0.291452,
+      0.303432,
+      0.326507,
+      0.296652,
+      0.304923,
+      0.32284,
+      0.291414,
+      0.323233,
+      0.308618
+    ],
+    "umap_ce": []
+  },
+  "aumap_baseline": {
+    "knn_overlap": 0.44,
+    "full_cohort_minutes": 20.3,
+    "interp_k": 5
+  },
+  "total_seconds": 135.3
+}

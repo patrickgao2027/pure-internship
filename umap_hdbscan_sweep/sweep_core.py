@@ -170,9 +170,29 @@ class UmapConfig:
     # set, transform always runs n_epochs//3 and batching becomes invariant. 200 is also
     # umap-learn's own fit default above 10k rows, so pinning it does not change the fit.
     n_epochs: int = 200
+    # Layout parameters, all at umap-learn's own defaults so an existing grid is unchanged.
+    # spread pairs with min_dist -- together they fit the (a, b) of the output kernel, which
+    # is why neither is interpretable alone. repulsion_strength weights negative samples
+    # against positive ones; set_op_mix_ratio blends union (1.0) and intersection (0.0) of
+    # the fuzzy simplicial sets.
+    spread: float = 1.0
+    repulsion_strength: float = 1.0
+    set_op_mix_ratio: float = 1.0
 
     def label(self) -> str:
-        return f"nn{self.n_neighbors}_md{self.min_dist}_nc{self.n_components}"
+        # Off-default parameters append, exactly as HdbscanConfig.label does, so a config
+        # that does not touch them keeps the historical "nn30_md0.05_nc2" directory name
+        # and stage 2's resume-by-directory-match still finds completed cells.
+        # min_dist keeps plain str() formatting, NOT :g -- ":g" would render 0.0 as "0",
+        # renaming every existing min_dist=0.0 cell directory and forcing a full re-run.
+        parts = [f"nn{self.n_neighbors}", f"md{self.min_dist}", f"nc{self.n_components}"]
+        if self.spread != 1.0:
+            parts.append(f"sp{self.spread:g}")
+        if self.repulsion_strength != 1.0:
+            parts.append(f"rs{self.repulsion_strength:g}")
+        if self.set_op_mix_ratio != 1.0:
+            parts.append(f"som{self.set_op_mix_ratio:g}")
+        return "_".join(parts)
 
     def as_dict(self) -> dict:
         return {
@@ -182,6 +202,9 @@ class UmapConfig:
             "metric": self.metric,
             "seed": self.seed,
             "n_epochs": self.n_epochs,
+            "spread": self.spread,
+            "repulsion_strength": self.repulsion_strength,
+            "set_op_mix_ratio": self.set_op_mix_ratio,
         }
 
 
@@ -236,6 +259,9 @@ def fit_umap(X: np.ndarray, config: UmapConfig, use_gpu: bool | None = None) -> 
             metric=config.metric,
             random_state=int(config.seed),
             n_epochs=int(config.n_epochs),
+            spread=float(config.spread),
+            repulsion_strength=float(config.repulsion_strength),
+            set_op_mix_ratio=float(config.set_op_mix_ratio),
         )
         embedding = _to_host(model.fit_transform(X)).astype(np.float32, copy=False)
         return FittedUmap(model=model, embedding=embedding, config=config, backend="cuml")
@@ -251,6 +277,9 @@ def fit_umap(X: np.ndarray, config: UmapConfig, use_gpu: bool | None = None) -> 
         metric=config.metric,
         random_state=int(config.seed),
         n_epochs=int(config.n_epochs),
+        spread=float(config.spread),
+        repulsion_strength=float(config.repulsion_strength),
+        set_op_mix_ratio=float(config.set_op_mix_ratio),
         low_memory=True,
     )
     embedding = np.asarray(model.fit_transform(X), dtype=np.float32)

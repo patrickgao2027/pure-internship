@@ -1,0 +1,329 @@
+{
+  "generated_utc": "2026-08-06T10:54:33.665655+00:00",
+  "embed_dir": "/home/patrick/pure-internship/uv_vae/runs/train_multi_20260802T192756Z/stage1_embed",
+  "total_rows": 157501580,
+  "latent_dim": 16,
+  "sizes": [
+    1000000,
+    2500000,
+    5000000,
+    10000000,
+    25000000
+  ],
+  "reference_fit_rows": 25000000,
+  "probe_rows": 1000000,
+  "knn_rows": 250000,
+  "pair_rows": 20000,
+  "nested_fit_sets": true,
+  "clusterer": "kmeans",
+  "tolerance": 0.01,
+  "backend": "cuml",
+  "metric_tiers": {
+    "trustworthiness": "knn",
+    "continuity": "knn",
+    "rnx_auc": "knn",
+    "spearman_distance": "pair",
+    "pearson_distance": "pair",
+    "procrustes_disparity": "full",
+    "adjusted_rand": "full",
+    "normalized_mutual_info": "full",
+    "adjusted_mutual_info": "full",
+    "jaccard": "full",
+    "davies_bouldin": "full",
+    "calinski_harabasz": "full",
+    "silhouette": "pair",
+    "dbcv": "clusterer"
+  },
+  "results": [
+    {
+      "fit_rows": 1000000,
+      "umap_config": {
+        "n_neighbors": 15,
+        "min_dist": 0.0,
+        "n_components": 2,
+        "metric": "euclidean",
+        "seed": 42,
+        "n_epochs": 200
+      },
+      "timing": {
+        "gather_seconds": 0.0,
+        "umap_fit_seconds": 6.0,
+        "probe_transform_seconds": 4.1,
+        "cluster_seconds": 0.1,
+        "local_metric_seconds": 87.5,
+        "global_metric_seconds": 7.5
+      },
+      "embedding_quality": {
+        "trustworthiness": 0.99672,
+        "continuity": 0.99785,
+        "rnx_auc": 0.12825,
+        "qnx_at_k": 0.10544,
+        "clamped_fraction": 0.34743,
+        "k": 15,
+        "k_max": 1500,
+        "rows": 20000,
+        "spearman_distance": 0.20226,
+        "pearson_distance": 0.20663,
+        "pairs_sampled": 19999029
+      },
+      "cluster_quality": {
+        "n_clusters": 25,
+        "noise_fraction": 0.0,
+        "davies_bouldin": 0.63451,
+        "calinski_harabasz": 1636961.2675,
+        "silhouette": 0.50429,
+        "silhouette_rows": 20000,
+        "dbcv": null
+      },
+      "vs_reference": {
+        "adjusted_rand": 0.33725,
+        "normalized_mutual_info": 0.57632,
+        "adjusted_mutual_info": 0.57628,
+        "jaccard": 0.22507,
+        "procrustes_disparity": 1.1138
+      },
+      "vs_previous": null
+    },
+    {
+      "fit_rows": 2500000,
+      "umap_config": {
+        "n_neighbors": 15,
+        "min_dist": 0.0,
+        "n_components": 2,
+        "metric": "euclidean",
+        "seed": 42,
+        "n_epochs": 200
+      },
+      "timing": {
+        "gather_seconds": 0.1,
+        "umap_fit_seconds": 30.3,
+        "probe_transform_seconds": 10.5,
+        "cluster_seconds": 0.1,
+        "local_metric_seconds": 88.3,
+        "global_metric_seconds": 7.6
+      },
+      "embedding_quality": {
+        "trustworthiness": 0.99706,
+        "continuity": 0.99789,
+        "rnx_auc": 0.14418,
+        "qnx_at_k": 0.13734,
+        "clamped_fraction": 0.32381,
+        "k": 15,
+        "k_max": 1500,
+        "rows": 20000,
+        "spearman_distance": 0.17884,
+        "pearson_distance": 0.17615,
+        "pairs_sampled": 19999029
+      },
+      "cluster_quality": {
+        "n_clusters": 25,
+        "noise_fraction": 0.0,
+        "davies_bouldin": 0.63835,
+        "calinski_harabasz": 1408580.15025,
+        "silhouette": 0.50375,
+        "silhouette_rows": 20000,
+        "dbcv": null
+      },
+      "vs_reference": {
+        "adjusted_rand": 0.4011,
+        "normalized_mutual_info": 0.62744,
+        "adjusted_mutual_info": 0.62741,
+        "jaccard": 0.27247,
+        "procrustes_disparity": 1.053
+      },
+      "vs_previous": {
+        "adjusted_rand": 0.66833,
+        "normalized_mutual_info": 0.80138,
+        "adjusted_mutual_info": 0.80136,
+        "jaccard": 0.52005,
+        "procrustes_disparity": 0.14869,
+        "previous_fit_rows": 1000000
+      }
+    },
+    {
+      "fit_rows": 5000000,
+      "umap_config": {
+        "n_neighbors": 15,
+        "min_dist": 0.0,
+        "n_components": 2,
+        "metric": "euclidean",
+        "seed": 42,
+        "n_epochs": 200
+      },
+      "timing": {
+        "gather_seconds": 0.2,
+        "umap_fit_seconds": 116.9,
+        "probe_transform_seconds": 21.7,
+        "cluster_seconds": 0.1,
+        "local_metric_seconds": 87.9,
+        "global_metric_seconds": 7.5
+      },
+      "embedding_quality": {
+        "trustworthiness": 0.99725,
+        "continuity": 0.99786,
+        "rnx_auc": 0.15361,
+        "qnx_at_k": 0.15723,
+        "clamped_fraction": 0.31469,
+        "k": 15,
+        "k_max": 1500,
+        "rows": 20000,
+        "spearman_distance": 0.19079,
+        "pearson_distance": 0.18772,
+        "pairs_sampled": 19999029
+      },
+      "cluster_quality": {
+        "n_clusters": 25,
+        "noise_fraction": 0.0,
+        "davies_bouldin": 0.71175,
+        "calinski_harabasz": 1305452.25611,
+        "silhouette": 0.47316,
+        "silhouette_rows": 20000,
+        "dbcv": null
+      },
+      "vs_reference": {
+        "adjusted_rand": 0.41134,
+        "normalized_mutual_info": 0.64057,
+        "adjusted_mutual_info": 0.64054,
+        "jaccard": 0.28037,
+        "procrustes_disparity": 0.9218
+      },
+      "vs_previous": {
+        "adjusted_rand": 0.7542,
+        "normalized_mutual_info": 0.85122,
+        "adjusted_mutual_info": 0.85121,
+        "jaccard": 0.62062,
+        "procrustes_disparity": 0.09371,
+        "previous_fit_rows": 2500000
+      }
+    },
+    {
+      "fit_rows": 10000000,
+      "umap_config": {
+        "n_neighbors": 15,
+        "min_dist": 0.0,
+        "n_components": 2,
+        "metric": "euclidean",
+        "seed": 42,
+        "n_epochs": 200
+      },
+      "timing": {
+        "gather_seconds": 0.5,
+        "umap_fit_seconds": 471.1,
+        "probe_transform_seconds": 43.4,
+        "cluster_seconds": 0.1,
+        "local_metric_seconds": 88.0,
+        "global_metric_seconds": 7.5
+      },
+      "embedding_quality": {
+        "trustworthiness": 0.9974,
+        "continuity": 0.99781,
+        "rnx_auc": 0.16122,
+        "qnx_at_k": 0.173,
+        "clamped_fraction": 0.30888,
+        "k": 15,
+        "k_max": 1500,
+        "rows": 20000,
+        "spearman_distance": 0.18972,
+        "pearson_distance": 0.18663,
+        "pairs_sampled": 19999029
+      },
+      "cluster_quality": {
+        "n_clusters": 25,
+        "noise_fraction": 0.0,
+        "davies_bouldin": 0.77589,
+        "calinski_harabasz": 1115457.98432,
+        "silhouette": 0.43275,
+        "silhouette_rows": 20000,
+        "dbcv": null
+      },
+      "vs_reference": {
+        "adjusted_rand": 0.43765,
+        "normalized_mutual_info": 0.66347,
+        "adjusted_mutual_info": 0.66344,
+        "jaccard": 0.30084,
+        "procrustes_disparity": 0.70125
+      },
+      "vs_previous": {
+        "adjusted_rand": 0.67428,
+        "normalized_mutual_info": 0.81842,
+        "adjusted_mutual_info": 0.81841,
+        "jaccard": 0.52602,
+        "procrustes_disparity": 0.13532,
+        "previous_fit_rows": 5000000
+      }
+    },
+    {
+      "fit_rows": 25000000,
+      "umap_config": {
+        "n_neighbors": 15,
+        "min_dist": 0.0,
+        "n_components": 2,
+        "metric": "euclidean",
+        "seed": 42,
+        "n_epochs": 200
+      },
+      "timing": {
+        "gather_seconds": 1.1,
+        "umap_fit_seconds": 2790.4,
+        "probe_transform_seconds": 108.2,
+        "cluster_seconds": 0.1,
+        "local_metric_seconds": 87.6,
+        "global_metric_seconds": 7.5
+      },
+      "embedding_quality": {
+        "trustworthiness": 0.9975,
+        "continuity": 0.99771,
+        "rnx_auc": 0.16632,
+        "qnx_at_k": 0.1846,
+        "clamped_fraction": 0.31174,
+        "k": 15,
+        "k_max": 1500,
+        "rows": 20000,
+        "spearman_distance": 0.1613,
+        "pearson_distance": 0.15559,
+        "pairs_sampled": 19999029
+      },
+      "cluster_quality": {
+        "n_clusters": 25,
+        "noise_fraction": 0.0,
+        "davies_bouldin": 0.77297,
+        "calinski_harabasz": 1027310.34807,
+        "silhouette": 0.40617,
+        "silhouette_rows": 20000,
+        "dbcv": null
+      },
+      "vs_reference": {
+        "adjusted_rand": 1.0,
+        "normalized_mutual_info": 1.0,
+        "adjusted_mutual_info": 1.0,
+        "jaccard": 1.0,
+        "procrustes_disparity": 0.0
+      },
+      "vs_previous": {
+        "adjusted_rand": 0.43765,
+        "normalized_mutual_info": 0.66347,
+        "adjusted_mutual_info": 0.66344,
+        "jaccard": 0.30084,
+        "procrustes_disparity": 0.70125,
+        "previous_fit_rows": 10000000
+      }
+    }
+  ],
+  "converged_at": {
+    "trustworthiness": 1000000,
+    "continuity": 1000000,
+    "rnx_auc": 10000000,
+    "spearman_distance": 25000000,
+    "pearson_distance": 25000000,
+    "procrustes_disparity": 25000000,
+    "adjusted_rand": 25000000,
+    "normalized_mutual_info": 25000000,
+    "adjusted_mutual_info": 25000000,
+    "jaccard": 25000000,
+    "silhouette": 25000000,
+    "davies_bouldin": 10000000,
+    "calinski_harabasz": 25000000,
+    "dbcv": null
+  },
+  "total_seconds": 4121.0
+}

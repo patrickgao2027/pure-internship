@@ -1,0 +1,42 @@
+[22:12:14] torch device: cuda
+[22:12:14] latent.npy: 157,501,580 rows x 16 dims
+[22:12:15] fit set 5,000,000 rows, probe set 200,000 held-out rows
+[22:12:16] gate 1: 5,000,000 fit rows, 200,000 probe rows, 3 fits ahead
+[22:12:16] [A] fitting UMAP (seed=42) ...
+[22:14:14] [A]   fit in 118.7s (backend=cuml)
+[22:14:23] [B] fitting UMAP (seed=42) ...
+[22:16:22] [B]   fit in 118.9s (backend=cuml)
+[22:16:26] [C] fitting UMAP (seed=43) ...
+[22:18:25] [C]   fit in 118.6s (backend=cuml)
+[22:18:29] scoring transform_repeat (kNN on 200,000 points, takes a moment) ...
+[22:18:32]   transform_repeat: kNN-overlap 1.0000
+[22:18:32] scoring same_seed_refit (kNN on 200,000 points, takes a moment) ...
+[22:18:34]   same_seed_refit: kNN-overlap 1.0000
+[22:18:34] scoring different_seed_refit (kNN on 200,000 points, takes a moment) ...
+[22:18:37]   different_seed_refit: kNN-overlap 0.4141
+[22:18:37] scoring latent-space neighbour preservation of the true transform() ...
+[22:18:41]   latent 16-D -> 2-D preservation: 0.1640
+[22:18:41] wrote /home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests/gate1_determinism.json
+
+-- Gate 1: cuML determinism floor ----------------------
+probe rows: 200,000 held out of a 5,000,000-row fit
+
+how much cuML's own answer moves, by what is allowed to vary:
+  transform() twice, one model   1.000   (bitwise identical: yes)
+  refit, same seed + same rows   1.000
+  refit, different seed          0.414   <- the ceiling
+
+for comparison, scored against that same fit A:
+  aUMAP interpolation            0.440
+
+reference, not a comparison (16-D latent vs 2-D embedding):
+  true transform() retains       0.164 of latent neighbours
+--------------------------------------------------------
+
+The ceiling is 0.414, at or below aUMAP's 0.440. Two independent cuML
+runs disagree about the probe neighbourhood as much as an approximation
+does, so 'reproduce this embedding' is not a well-posed target and no
+amount of tuning can be shown to have helped. Switch the criterion to
+something two real runs would agree on: HDBSCAN label agreement (ARI)
+between them, or preservation of the 16-D latent neighbourhood above,
+which is where the biology actually lives.

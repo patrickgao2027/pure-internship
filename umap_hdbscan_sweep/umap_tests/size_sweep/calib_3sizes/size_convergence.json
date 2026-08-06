@@ -1,0 +1,215 @@
+{
+  "generated_utc": "2026-08-06T08:16:37.752234+00:00",
+  "embed_dir": "/home/patrick/pure-internship/uv_vae/runs/train_multi_20260802T192756Z/stage1_embed",
+  "total_rows": 157501580,
+  "latent_dim": 16,
+  "sizes": [
+    1000000,
+    2500000,
+    5000000
+  ],
+  "reference_fit_rows": 5000000,
+  "probe_rows": 1000000,
+  "knn_rows": 250000,
+  "pair_rows": 20000,
+  "nested_fit_sets": true,
+  "clusterer": "kmeans",
+  "tolerance": 0.01,
+  "backend": "cuml",
+  "metric_tiers": {
+    "trustworthiness": "knn",
+    "continuity": "knn",
+    "rnx_auc": "knn",
+    "spearman_distance": "pair",
+    "pearson_distance": "pair",
+    "procrustes_disparity": "full",
+    "adjusted_rand": "full",
+    "normalized_mutual_info": "full",
+    "adjusted_mutual_info": "full",
+    "jaccard": "full",
+    "davies_bouldin": "full",
+    "calinski_harabasz": "full",
+    "silhouette": "pair",
+    "dbcv": "clusterer"
+  },
+  "results": [
+    {
+      "fit_rows": 1000000,
+      "umap_config": {
+        "n_neighbors": 15,
+        "min_dist": 0.0,
+        "n_components": 2,
+        "metric": "euclidean",
+        "seed": 42,
+        "n_epochs": 200
+      },
+      "timing": {
+        "gather_seconds": 0.1,
+        "umap_fit_seconds": 6.0,
+        "probe_transform_seconds": 4.1,
+        "cluster_seconds": 0.2,
+        "local_metric_seconds": 25.0,
+        "global_metric_seconds": 7.5
+      },
+      "embedding_quality": {
+        "trustworthiness": 0.99894,
+        "continuity": 0.99918,
+        "rnx_auc": 0.10935,
+        "qnx_at_k": 0.10545,
+        "clamped_fraction": 0.4937,
+        "k": 15,
+        "k_max": 400,
+        "rows": 20000,
+        "spearman_distance": 0.20226,
+        "pearson_distance": 0.20663,
+        "pairs_sampled": 19999029
+      },
+      "cluster_quality": {
+        "n_clusters": 25,
+        "noise_fraction": 0.0,
+        "davies_bouldin": 0.6345,
+        "calinski_harabasz": 1636962.50467,
+        "silhouette": 0.5043,
+        "silhouette_rows": 20000,
+        "dbcv": null
+      },
+      "vs_reference": {
+        "adjusted_rand": 0.60112,
+        "normalized_mutual_info": 0.76725,
+        "adjusted_mutual_info": 0.76723,
+        "jaccard": 0.44949,
+        "procrustes_disparity": 0.3
+      },
+      "vs_previous": null
+    },
+    {
+      "fit_rows": 2500000,
+      "umap_config": {
+        "n_neighbors": 15,
+        "min_dist": 0.0,
+        "n_components": 2,
+        "metric": "euclidean",
+        "seed": 42,
+        "n_epochs": 200
+      },
+      "timing": {
+        "gather_seconds": 0.1,
+        "umap_fit_seconds": 30.4,
+        "probe_transform_seconds": 10.5,
+        "cluster_seconds": 0.1,
+        "local_metric_seconds": 25.0,
+        "global_metric_seconds": 7.4
+      },
+      "embedding_quality": {
+        "trustworthiness": 0.99902,
+        "continuity": 0.99922,
+        "rnx_auc": 0.13006,
+        "qnx_at_k": 0.13735,
+        "clamped_fraction": 0.45896,
+        "k": 15,
+        "k_max": 400,
+        "rows": 20000,
+        "spearman_distance": 0.17884,
+        "pearson_distance": 0.17615,
+        "pairs_sampled": 19999029
+      },
+      "cluster_quality": {
+        "n_clusters": 25,
+        "noise_fraction": 0.0,
+        "davies_bouldin": 0.63835,
+        "calinski_harabasz": 1408580.24926,
+        "silhouette": 0.50375,
+        "silhouette_rows": 20000,
+        "dbcv": null
+      },
+      "vs_reference": {
+        "adjusted_rand": 0.75424,
+        "normalized_mutual_info": 0.85123,
+        "adjusted_mutual_info": 0.85122,
+        "jaccard": 0.62068,
+        "procrustes_disparity": 0.09371
+      },
+      "vs_previous": {
+        "adjusted_rand": 0.66834,
+        "normalized_mutual_info": 0.80139,
+        "adjusted_mutual_info": 0.80137,
+        "jaccard": 0.52006,
+        "procrustes_disparity": 0.14869,
+        "previous_fit_rows": 1000000
+      }
+    },
+    {
+      "fit_rows": 5000000,
+      "umap_config": {
+        "n_neighbors": 15,
+        "min_dist": 0.0,
+        "n_components": 2,
+        "metric": "euclidean",
+        "seed": 42,
+        "n_epochs": 200
+      },
+      "timing": {
+        "gather_seconds": 0.2,
+        "umap_fit_seconds": 117.6,
+        "probe_transform_seconds": 21.6,
+        "cluster_seconds": 0.1,
+        "local_metric_seconds": 25.0,
+        "global_metric_seconds": 7.4
+      },
+      "embedding_quality": {
+        "trustworthiness": 0.99907,
+        "continuity": 0.99924,
+        "rnx_auc": 0.14307,
+        "qnx_at_k": 0.15725,
+        "clamped_fraction": 0.44409,
+        "k": 15,
+        "k_max": 400,
+        "rows": 20000,
+        "spearman_distance": 0.19079,
+        "pearson_distance": 0.18772,
+        "pairs_sampled": 19999029
+      },
+      "cluster_quality": {
+        "n_clusters": 25,
+        "noise_fraction": 0.0,
+        "davies_bouldin": 0.7117,
+        "calinski_harabasz": 1305456.75411,
+        "silhouette": 0.47318,
+        "silhouette_rows": 20000,
+        "dbcv": null
+      },
+      "vs_reference": {
+        "adjusted_rand": 1.0,
+        "normalized_mutual_info": 1.0,
+        "adjusted_mutual_info": 1.0,
+        "jaccard": 1.0,
+        "procrustes_disparity": 0.0
+      },
+      "vs_previous": {
+        "adjusted_rand": 0.75424,
+        "normalized_mutual_info": 0.85123,
+        "adjusted_mutual_info": 0.85122,
+        "jaccard": 0.62068,
+        "procrustes_disparity": 0.09371,
+        "previous_fit_rows": 2500000
+      }
+    }
+  ],
+  "converged_at": {
+    "trustworthiness": 1000000,
+    "continuity": 1000000,
+    "rnx_auc": 5000000,
+    "spearman_distance": 5000000,
+    "pearson_distance": 5000000,
+    "procrustes_disparity": 5000000,
+    "adjusted_rand": 5000000,
+    "normalized_mutual_info": 5000000,
+    "adjusted_mutual_info": 5000000,
+    "jaccard": 5000000,
+    "silhouette": 5000000,
+    "davies_bouldin": 5000000,
+    "calinski_harabasz": 5000000,
+    "dbcv": null
+  },
+  "total_seconds": 312.8
+}

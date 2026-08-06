@@ -1,0 +1,56 @@
+[20:53:39] torch device: cuda
+[20:53:39] latent.npy: 157,501,580 rows x 16 dims
+[20:53:40] fit set 5,000,000 rows, probe set 200,000 held-out rows
+[20:53:40] UMAP config: {'n_neighbors': 15, 'min_dist': 0.0, 'n_components': 2, 'metric': 'euclidean', 'seed': 42, 'n_epochs': 200}
+[20:53:41] fitting UMAP on 5,000,000 rows ...
+[20:55:36]   fit in 115.1s (backend=cuml)
+[20:55:36] true transform() of 200,000 probe rows (ground truth) ...
+[20:55:40]   transform in 4.3s (-> 54 min full cohort)
+[20:55:40] encoder 16 -> 256 -> 256 -> 128 -> 2 (103,298 parameters)
+[20:55:40] training: MSE regression onto cuML embedding, 15,000 steps
+[20:55:41]     regress step 1/15000  mse 38.241615
+[20:55:41]     regress step 751/15000  mse 0.772053
+[20:55:42]     regress step 1501/15000  mse 0.533129
+[20:55:42]     regress step 2251/15000  mse 0.454481
+[20:55:43]     regress step 3001/15000  mse 0.405622
+[20:55:43]     regress step 3751/15000  mse 0.381660
+[20:55:44]     regress step 4501/15000  mse 0.369854
+[20:55:44]     regress step 5251/15000  mse 0.325052
+[20:55:45]     regress step 6001/15000  mse 0.356814
+[20:55:45]     regress step 6751/15000  mse 0.392905
+[20:55:46]     regress step 7501/15000  mse 0.315647
+[20:55:46]     regress step 8251/15000  mse 0.326161
+[20:55:46]     regress step 9001/15000  mse 0.291452
+[20:55:47]     regress step 9751/15000  mse 0.303432
+[20:55:47]     regress step 10501/15000  mse 0.326507
+[20:55:48]     regress step 11251/15000  mse 0.296652
+[20:55:48]     regress step 12001/15000  mse 0.304923
+[20:55:49]     regress step 12751/15000  mse 0.322840
+[20:55:49]     regress step 13501/15000  mse 0.291414
+[20:55:50]     regress step 14251/15000  mse 0.323233
+[20:55:50]     regress step 15000/15000  mse 0.308618
+[20:55:50] training complete in 10.0s
+[20:55:50] parametric transform of 200,000 probe rows ...
+[20:55:50]   inference in 0.00s (-> 0.1 min full cohort)
+[20:55:53] wrote /home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests/parametric_umap_regress.json
+
+-- parametric UMAP (regress) -------------------------
+probe rows: 200,000 held out of a 5,000,000-row fit
+
+UMAP fit        :   115.1s  (unchanged, still required)
+encoder train   :    10.0s  (one-off, per UMAP fit)
+true transform  :    4.28s probe -> 54 min full cohort
+parametric infer:    0.00s probe -> 0.1 min full cohort (945x)
+
+end to end   current 56.4 min   ->   parametric 2.1 min
+
+quality vs true transform() (Procrustes-aligned):
+  kNN-overlap   0.055      <- decides it
+  mean error    0.055 embedding std
+  p95 error     0.141 embedding std
+  aUMAP was     0.440 overlap at 20.3 min
+--------------------------------------------------------
+
+Worse than aUMAP. Do not tune this further before checking the Gate 1
+determinism floor -- if two identical cuML fits already disagree at this
+level, no approximation can be shown to beat it and the comparison is moot.

@@ -1,0 +1,102 @@
+[gpu] device 47.3 GB total, 46.8 GB free (0.4 GB held by other processes); this stage wants 16.0 GB
+[gpu_budget] cap 16.0 GB of 47.27 GB = torch 1.6 GB (fraction 0.0338) + rmm pool 14.4 GB
+[11:11:27] largest fit (5,000,000 rows) needs roughly 0.9 GB on the GPU
+[11:11:27] latent.npy: 157,501,580 rows x 16 dims
+[11:11:32] probe 1,000,000 held-out rows; fit sizes 1,000,000, 2,500,000, 5,000,000 (nested)
+[11:11:32] materialising the probe latents ...
+[11:11:32] metric tiers: full 1,000,000 / knn 250,000 / pair 20,000
+[11:11:32] === fit size 1,000,000 ===
+[11:11:32]   gathering 1,000,000 fit rows from the memmap ...
+[11:11:32]   fitting UMAP on 1,000,000 rows ...
+[11:11:38]     fit in 6.0s (backend=cuml)
+[11:11:38]   transform() of the 1,000,000-row probe ...
+[11:11:42]     transform in 4.1s
+[11:11:42]   clustering the probe (kmeans) ...
+[11:11:45]     25 clusters, 0.0% noise, in 0.2s
+[11:11:45]   embedding quality: local on 250,000 rows ...
+[11:12:10]   embedding quality: global on 20,000 rows ...
+[11:12:17]     trustworthiness 0.9989  continuity 0.9992  RNX AUC 0.1094  spearman 0.2023
+[11:12:17]     WARNING: 49.4% of neighbour ranks fell outside the k_max=400 window; trustworthiness and continuity are optimistic. Raise --metric-k-max.
+[11:12:17] === fit size 2,500,000 ===
+[11:12:17]   gathering 2,500,000 fit rows from the memmap ...
+[11:12:17]   fitting UMAP on 2,500,000 rows ...
+[11:12:48]     fit in 30.4s (backend=cuml)
+[11:12:48]   transform() of the 1,000,000-row probe ...
+[11:12:58]     transform in 10.5s
+[11:12:58]   clustering the probe (kmeans) ...
+[11:13:01]     25 clusters, 0.0% noise, in 0.1s
+[11:13:01]   embedding quality: local on 250,000 rows ...
+[11:13:26]   embedding quality: global on 20,000 rows ...
+[11:13:33]     trustworthiness 0.9990  continuity 0.9992  RNX AUC 0.1301  spearman 0.1788
+[11:13:33]     WARNING: 45.9% of neighbour ranks fell outside the k_max=400 window; trustworthiness and continuity are optimistic. Raise --metric-k-max.
+[11:13:33] === fit size 5,000,000 ===
+[11:13:33]   gathering 5,000,000 fit rows from the memmap ...
+[11:13:33]   fitting UMAP on 5,000,000 rows ...
+[11:15:31]     fit in 117.6s (backend=cuml)
+[11:15:31]   transform() of the 1,000,000-row probe ...
+[11:15:53]     transform in 21.6s
+[11:15:53]   clustering the probe (kmeans) ...
+[11:15:55]     25 clusters, 0.0% noise, in 0.1s
+[11:15:55]   embedding quality: local on 250,000 rows ...
+[11:16:20]   embedding quality: global on 20,000 rows ...
+[11:16:27]     trustworthiness 0.9991  continuity 0.9992  RNX AUC 0.1431  spearman 0.1908
+[11:16:27]     WARNING: 44.4% of neighbour ranks fell outside the k_max=400 window; trustworthiness and continuity are optimistic. Raise --metric-k-max.
+[11:16:27] === comparing against the 5,000,000-row reference ===
+[11:16:37] wrote /home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests/calib/size_convergence.json
+
+=============================================================
+UMAP fit-size convergence -- probe 1,000,000 held-out rows, clusterer=kmeans
+=============================================================
+  fit rows                           1M       2.5M         5M
+
+  -- cost --
+  UMAP fit (s)                   6.0000    30.4000   117.6000
+  probe transform (s)            4.1000    10.5000    21.6000
+  cluster (s)                    0.2000     0.1000     0.1000
+
+  -- embedding quality (2-D map vs the 16-D latent) --
+  trustworthiness                0.9989     0.9990     0.9991
+  continuity                     0.9992     0.9992     0.9992
+  rnx_auc                        0.1094     0.1301     0.1431
+  spearman_distance              0.2023     0.1788     0.1908
+  pearson_distance               0.2066     0.1762     0.1877
+  procrustes vs ref              0.3000     0.0937     0.0000
+
+  -- clustering agreement with the 5,000,000-row reference --
+  adjusted_rand                  0.6011     0.7542     1.0000
+  normalized_mutual_info         0.7672     0.8512     1.0000
+  adjusted_mutual_info           0.7672     0.8512     1.0000
+  jaccard                        0.4495     0.6207     1.0000
+
+  -- clustering agreement with the previous size --
+  adjusted_rand                      --     0.6683     0.7542
+  jaccard                            --     0.5201     0.6207
+
+  -- clustering quality --
+  n_clusters                         25         25         25
+  noise_fraction                 0.0000     0.0000     0.0000
+  silhouette                     0.5043     0.5038     0.4732
+  davies_bouldin                 0.6345     0.6383     0.7117
+  calinski_harabasz           1.637e+06  1.409e+06  1.305e+06
+  dbcv                               --         --         --
+
+  -- converged at (within 0.01 of the reference, and staying there) --
+  trustworthiness             1,000,000 rows
+  continuity                  1,000,000 rows
+  rnx_auc                     5,000,000 rows
+  spearman_distance           5,000,000 rows
+  pearson_distance            5,000,000 rows
+  procrustes_disparity        5,000,000 rows
+  adjusted_rand               5,000,000 rows
+  normalized_mutual_info      5,000,000 rows
+  adjusted_mutual_info        5,000,000 rows
+  jaccard                     5,000,000 rows
+  silhouette                  5,000,000 rows
+  davies_bouldin              5,000,000 rows
+  calinski_harabasz           5,000,000 rows
+  dbcv                        never
+
+  The slowest metric only settles at the reference itself (5,000,000 rows), which is not evidence of convergence -- agreement with the reference is 1.0 there by construction. Extend --sizes upward, or read the vs-previous rows instead.
+  Never converged: dbcv
+=============================================================
+

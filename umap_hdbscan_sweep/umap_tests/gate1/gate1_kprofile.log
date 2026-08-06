@@ -1,0 +1,67 @@
+[22:50:22] torch device: cuda
+[22:50:22] latent.npy: 157,501,580 rows x 16 dims
+[22:50:23] fit set 5,000,000 rows, probe set 200,000 held-out rows
+[22:50:24] gate 1: 5,000,000 fit rows, 200,000 probe rows, 3 fits ahead
+[22:50:24] [A] fitting UMAP (seed=42) ...
+[22:52:19] [A]   fit in 115.2s (backend=cuml)
+[22:52:28] [B] fitting UMAP (seed=42) ...
+[22:54:27] [B]   fit in 119.1s (backend=cuml)
+[22:54:31] [C] fitting UMAP (seed=43) ...
+[22:56:29] [C]   fit in 118.5s (backend=cuml)
+[22:56:34] scoring transform_repeat (kNN on 200,000 points, takes a moment) ...
+[22:56:36]   transform_repeat: kNN-overlap 1.0000
+[22:56:36] scoring same_seed_refit (kNN on 200,000 points, takes a moment) ...
+[22:56:39]   same_seed_refit: kNN-overlap 1.0000
+[22:56:39] scoring different_seed_refit (kNN on 200,000 points, takes a moment) ...
+[22:56:41]   different_seed_refit: kNN-overlap 0.4141
+[22:56:41] scoring latent-space neighbour preservation of the true transform() ...
+[22:56:46]   latent 16-D -> 2-D preservation: 0.1640
+[22:56:46] saved probe indices and coordinates (fit A, fit C) to /home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests
+[22:56:46] k-profile at k = [15, 50, 200, 500, 2000]
+[22:56:46]   different-seed refit (fit A vs fit C):
+[22:56:48]     kNN(a, k=2000) in 2.5s
+[22:56:51]     kNN(b, k=2000) in 2.4s
+[22:56:53]     k=   15: overlap 0.4094
+[22:56:54]     k=   50: overlap 0.6143
+[22:56:59]     k=  200: overlap 0.7792
+[22:57:10]     k=  500: overlap 0.8263
+[22:57:59]     k= 2000: overlap 0.8606
+[22:57:59]   16-D latent vs 2-D embedding (fit A):
+[22:58:02]     kNN(a, k=2000) in 3.8s
+[22:58:05]     kNN(b, k=2000) in 2.4s
+[22:58:06]     k=   15: overlap 0.1620
+[22:58:07]     k=   50: overlap 0.1960
+[22:58:11]     k=  200: overlap 0.2048
+[22:58:22]     k=  500: overlap 0.2058
+[22:59:10]     k= 2000: overlap 0.2168
+[22:59:10] wrote /home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests/gate1_determinism.json
+
+-- Gate 1: cuML determinism floor ----------------------
+probe rows: 200,000 held out of a 5,000,000-row fit
+
+how much cuML's own answer moves, by what is allowed to vary:
+  transform() twice, one model   1.000   (bitwise identical: yes)
+  refit, same seed + same rows   1.000
+  refit, different seed          0.414   <- the ceiling
+
+for comparison, scored against that same fit A:
+  aUMAP interpolation            0.440
+
+overlap by neighbourhood size -- which scale does the disagreement live at?
+                                    k=15     k=50    k=200    k=500   k=2000
+  refit, different seed            0.409    0.614    0.779    0.826    0.861
+  16-D latent vs 2-D embedding     0.162    0.196    0.205    0.206    0.217
+--------------------------------------------------------
+
+The disagreement is local: two seeds share only 0.414 of the 15 nearest
+neighbours but 0.861 at k=2000. They place reads on the same islands and
+argue only about ordering inside them, which is exactly the scale HDBSCAN
+ignores. Score approximations at k=2000, not 15 -- k=15 is measuring seed noise.
+
+The ceiling is 0.414, at or below aUMAP's 0.440. Two independent cuML
+runs disagree about the probe neighbourhood as much as an approximation
+does, so 'reproduce this embedding' is not a well-posed target and no
+amount of tuning can be shown to have helped. Switch the criterion to
+something two real runs would agree on: HDBSCAN label agreement (ARI)
+between them, or preservation of the 16-D latent neighbourhood above,
+which is where the biology actually lives.

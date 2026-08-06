@@ -96,11 +96,20 @@ HIGHER_IS_BETTER = {
 
 # ── neighbour lists ────────────────────────────────────────────────────────────
 
+# Neighbour-list work is chunked to a fixed number of *elements*, not rows, because peak
+# memory is rows x k and k varies by more than an order of magnitude across callers. A
+# fixed row count that is comfortable at k=400 allocates 12x more at k=5000 and OOMs.
+# These budgets reproduce the previous fixed row defaults at k≈400, so nothing about the
+# earlier runs changes: only the loop trip count moves, never the result.
+KNN_QUERY_ELEMENTS = 50_000_000
+RANK_CHUNK_ELEMENTS = 20_000_000
+
+
 def knn_indices(
     X: np.ndarray,
     k: int,
     use_gpu: bool | None = None,
-    query_chunk: int = 100_000,
+    query_chunk: int | None = None,
 ) -> np.ndarray:
     """Indices of the ``k`` nearest neighbours of every row, self excluded.
 
@@ -108,12 +117,17 @@ def knn_indices(
     tree, and more importantly an *approximate* index would put its own recall error
     inside every metric downstream -- the thing being measured here is a few percent, and
     NN-Descent's recall miss is the same order.
+
+    ``query_chunk`` defaults to whatever keeps one batch of results near
+    ``KNN_QUERY_ELEMENTS``; pass an explicit value to override.
     """
     use_gpu = core.gpu_available() if use_gpu is None else use_gpu
     X = np.ascontiguousarray(np.asarray(X, dtype=np.float32))
     n = X.shape[0]
     if k >= n:
         raise ValueError(f"k={k} needs at least {k + 1} rows, got {n}")
+    if query_chunk is None:
+        query_chunk = max(1, KNN_QUERY_ELEMENTS // (k + 1))
 
     if use_gpu:
         from cuml.neighbors import NearestNeighbors as CuNN
@@ -152,7 +166,7 @@ def neighbour_ranks(
     nn_query: np.ndarray,
     nn_reference: np.ndarray,
     n_points: int,
-    chunk_rows: int = 50_000,
+    chunk_rows: int | None = None,
 ) -> np.ndarray:
     """Position of each ``nn_query`` entry inside the same row of ``nn_reference``.
 
@@ -165,10 +179,15 @@ def neighbour_ranks(
     per-row-sorted keys are globally sorted and a single searchsorted resolves every row
     at once. That is O(nk log k) instead of the O(n * n_points) an explicit lookup table
     of positions would cost.
+
+    Each chunk holds several int64 arrays of ``chunk_rows x k_reference``, so the chunk is
+    sized in elements rather than rows -- see ``RANK_CHUNK_ELEMENTS``.
     """
     n, k_reference = nn_reference.shape
     if nn_query.shape[0] != n:
         raise ValueError(f"row mismatch: query {nn_query.shape[0]}, reference {n}")
+    if chunk_rows is None:
+        chunk_rows = max(1, RANK_CHUNK_ELEMENTS // max(k_reference, 1))
     out = np.empty(nn_query.shape, dtype=np.int32)
 
     for start in range(0, n, chunk_rows):
