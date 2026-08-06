@@ -91,12 +91,25 @@ tuned against. A VAE latent's extent depends on β and is not knowable in advanc
 epsilon carried over from UMAP space is meaningless. Stage 2 prints the per-dimension
 extent before it fits anything — read that number first, then set `SELECTION_EPSILONS`.
 
-### 5. Add `cluster_selection_method=leaf` to the grid
+### 5. One HDBSCAN configuration, not a grid
 
-Default here is `eom,leaf` rather than `eom` alone. A raw VAE latent tends toward a few
-broad density regions rather than the many tight islands UMAP manufactures, and `eom`
-answers that with a handful of enormous clusters. `leaf` cuts the condensed tree at its
-finest level instead.
+`mcs=1000, min_samples=25, eom, epsilon=0, scale=none` — a single cell. Each env var still
+accepts a comma-separated list if you want a grid back, but 30 cells is not worth the wall
+clock before there is one result to react to.
+
+- **`mcs=1000`** is the baseline's best-silhouette cut (0.578, 1,150 clusters, 29.6 %
+  noise), so it is the most directly comparable single choice, and clusters that size hold
+  enough mutations for a stable 96-context catalog.
+- **`min_samples=25`** is the project default everywhere else. The baseline used 5 only
+  because 25 and 50 OOMed — a memory accident, not a finding.
+- **`eom`, not `leaf`.** If the latent really is one smooth blob, `eom` answers with two or
+  three enormous clusters — and that *is* the result, the honest answer to the research
+  question. `leaf` would cut the condensed tree finely enough to manufacture structure the
+  density does not support. Every prior result in this project used `eom` too.
+
+`leaf` remains available (`SELECTION_METHOD=leaf`) and is the right second run *if* `eom`
+returns a handful of huge clusters and you want to see whether anything is nested inside
+them.
 
 ### 6. Consider standardising the two dimensions
 
@@ -106,28 +119,67 @@ most of the variance. Euclidean HDBSCAN then effectively clusters on that dimens
 run `SCALE=standardize`. It is off by default because it is a real change to the geometry,
 not a formatting step.
 
-### 7. `min_samples` above 5 should fit now
+### 7. `min_samples=25` should fit now
 
 The 16-D sweep OOMed for `min_samples` ∈ {25, 50} — the RMM pool peaked at 13.6 GB of 14.4
-and never shrank. In 2-D the kNN/MST structures are far smaller, so the default grid keeps
-5, 25 and 50. If it still OOMs, the fix is the RMM pool reset noted in
-`AGENT_CONTEXT_2026-08-04.md` §3, not a smaller grid.
+and never shrank. `min_samples` is the multiplier on the dominant memory term (the kNN
+graph is `N × min_samples × 8` bytes), which is exactly why 25 died and 5 survived. In 2-D
+the surrounding structures are far smaller, so 25 is affordable — see the table in §8 for
+what it costs at each fit size. If it still OOMs, the fix is the RMM pool reset noted in
+`AGENT_CONTEXT_2026-08-04.md` §3.
 
-### 8. `FIT_ROWS` — left at 5,000,000 deliberately
+### 8. `FIT_ROWS=all` — 5M was a UMAP constraint, not an HDBSCAN one
 
-The 2-D fit is much cheaper than the 16-D one, so `all` is realistic here in a way it was
-not before. It is left at 5M for the first run because that is what the baseline used, and
-changing it changes what is being compared. Re-run at `all` once the comparison is banked.
+The 5M cap existed because of the 16-D + UMAP path: cuML UMAP's kNN graph, plus a
+65-minute `approximate_predict` per cell over 157M rows, times 480 cells. **None of that
+applies here** — there is no UMAP graph, the space is 2-D, and there is one cell.
 
-### 9. Things worth leaving alone the first time
+Fitting on 5M of ~157.5M is a **3.2 % sample**, and it costs real signal: a genuine cluster
+of 30,000 loci contributes ~950 rows to the fit, which is under `min_cluster_size`, so it
+vanishes. Anything rarer is invisible. Rare mutational processes are the point of the
+project.
 
-`hidden_dims` (256,128), `hidden_dropout` (0.4), batch size, learning rate, epochs. Two are
-plausible follow-ups but confound the comparison if changed now:
+HDBSCAN's device footprint is roughly `N × (min_samples × 8 + 32)` bytes — the kNN graph
+plus the O(N) trees:
 
-- `HIDDEN_DIMS=256,128,32` — 128 → 2 is a 64× funnel in one step; a gentler taper may
-  train better.
-- `HIDDEN_DROPOUT=0.2` — dropping 40 % of the layer feeding a 2-unit bottleneck is a much
-  harsher constraint than feeding a 16-unit one.
+| fit rows | ms=5 | ms=25 |
+|---|---|---|
+| 5,000,000 | 0.3 GB | 1.1 GB |
+| 25,000,000 | 1.7 GB | 5.4 GB |
+| 50,000,000 | 3.4 GB | 10.8 GB |
+| 157,500,000 (all) | 10.6 GB | **34.0 GB** |
+
+So at the old 5M the card was ~97 % idle as far as HDBSCAN was concerned. `all` at ms=25
+needs roughly 34 GB, which fits the 48 GB card but **not** a 6 GB co-tenant slice — run it
+when the trainer is idle:
+
+```bash
+GPU_TOTAL_GB=40 TRAINER_GPU_GB=0 STAGE=2 bash latent2d_test/run_latent2d.sh
+```
+
+Stage 2 prints this estimate before fitting and warns with the row count that *would* fit,
+so an over-large setting costs seconds rather than an OOM an hour in. If it still dies:
+`FIT_ROWS=50000000` → `25000000` → `10000000`.
+
+One caveat: this breaks exact comparability with the baseline's 5M fit. That is a
+deliberate trade — the baseline's fit size was a constraint, not a choice, and the ARI
+comparison is against its *labels*, which cover the full population either way.
+
+### 9. Architecture — deepened, and dropout lowered because of it
+
+`hidden_dims = 256,128,64,16` → 2. The baseline's `256,128` ends in a 128 → 2 step, a 64×
+contraction in one layer; this tapers so the largest single step is 16 → 2. The decoder is
+built symmetrically, so both halves deepen.
+
+`hidden_dropout = 0.2`, down from 0.4, **as a consequence of that taper rather than a free
+choice.** `TabularVAEWithDropout.encode` applies `hidden_drop` after *every* ReLU, so with
+four hidden layers it now also hits the 16-unit layer feeding `mu`. At p=0.4 that keeps
+~9.6 of 16 units with enough variance that some batches reach the 2-D bottleneck through
+very few survivors — a severe bottleneck stacked on a severe bottleneck. p=0.2 keeps ~12.8
+while still regularising the wide layers, where nearly all the parameters live.
+
+Left at baseline: batch size 32768, lr 1e-3, epochs 40 / patience 8 / shards 20, input
+dropout 0.1.
 
 Expect reconstruction MSE to rise substantially versus the 16-D model. That is the cost
 being measured, not a bug.

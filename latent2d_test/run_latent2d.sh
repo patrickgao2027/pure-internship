@@ -116,32 +116,66 @@ CHROMOSOMES="${CHROMOSOMES:-}"
 #
 # 0.01 is a starting point, not a settled value -- sweep it (see the README).
 KL_WEIGHT="${KL_WEIGHT:-0.01}"
-HIDDEN_DIMS="${HIDDEN_DIMS:-256,128}"
+
+# 256 -> 128 -> 64 -> 16 -> 2. The baseline's 256,128 ends in a 128 -> 2 step, a 64x
+# contraction in one layer; this tapers instead, so the largest single step is 16 -> 2.
+# The decoder is built symmetrically, so this deepens both halves.
+HIDDEN_DIMS="${HIDDEN_DIMS:-256,128,64,16}"
+
 BATCH_SIZE="${BATCH_SIZE:-32768}"
 LEARNING_RATE="${LEARNING_RATE:-1e-3}"
 EPOCH_CEILING="${EPOCH_CEILING:-40}"
 EPOCH_SHARDS="${EPOCH_SHARDS:-20}"
 PATIENCE="${PATIENCE:-8}"
 INPUT_DROPOUT="${INPUT_DROPOUT:-0.1}"
-HIDDEN_DROPOUT="${HIDDEN_DROPOUT:-0.4}"
 
-# ── Clustering grid ─────────────────────────────────────────────────────────
-MIN_CLUSTER_SIZES="${MIN_CLUSTER_SIZES:-100,250,500,1000,2500}"
-MIN_SAMPLES="${MIN_SAMPLES:-5,25,50}"
-# 'leaf' is worth having in this test specifically: a raw VAE latent tends toward a few
-# broad density regions rather than the many tight islands UMAP manufactures, and eom
-# answers that with a handful of huge clusters. leaf cuts the condensed tree at its
-# finest level instead.
-SELECTION_METHODS="${SELECTION_METHODS:-eom,leaf}"
-# In LATENT units, not UMAP units. 0 = off. Read the per-dimension extent stage 2 prints
-# before setting this to anything else.
-SELECTION_EPSILONS="${SELECTION_EPSILONS:-0}"
+# Lowered from the baseline 0.4 *because* of the taper above, not as a free choice.
+# TabularVAEWithDropout.encode applies hidden_drop after EVERY ReLU, so with four hidden
+# layers it now also hits the 16-unit layer feeding mu. At p=0.4 that keeps ~9.6 of 16
+# units, with enough variance that some batches reach the 2-D bottleneck through very few
+# survivors -- a severe bottleneck stacked on a severe bottleneck. p=0.2 keeps ~12.8 while
+# still regularising the wide layers, where most of the parameters are.
+HIDDEN_DROPOUT="${HIDDEN_DROPOUT:-0.2}"
+
+# ── Clustering: ONE configuration, not a grid ───────────────────────────────
+# Each of these still accepts a comma-separated list if you want a grid back; they are
+# single values because 30 cells is not worth the wall clock before there is one result
+# to react to.
+#
+# mcs=1000 is the baseline's best-silhouette cut (0.578 at 1,150 clusters, 29.6% noise),
+#   so it is the most directly comparable single choice, and clusters that size hold
+#   enough mutations for a stable 96-context SigProfiler catalog.
+MIN_CLUSTER_SIZE="${MIN_CLUSTER_SIZE:-1000}"
+# ms=25 is the project default everywhere else (clustering_core, run_variant_cluster_
+#   pipeline). The baseline only used 5 because 25 and 50 OOMed in 16-D UMAP space -- a
+#   memory accident, not a finding. A raw latent is smoother and noisier than UMAP's
+#   manufactured islands, so the more conservative core-distance smoothing is right here.
+MIN_SAMPLES="${MIN_SAMPLES:-25}"
+# eom, not leaf. If the latent really is one smooth blob, eom answers with two or three
+#   enormous clusters -- and that IS the result, the honest answer to the research
+#   question. leaf would cut the condensed tree finely enough to manufacture structure
+#   that the density does not support. Every prior result in this project used eom too.
+SELECTION_METHOD="${SELECTION_METHOD:-eom}"
+# In LATENT units, not UMAP units, and the latent's extent is not knowable until the VAE
+#   has trained. Off until you have read the extent stage 2 prints.
+SELECTION_EPSILON="${SELECTION_EPSILON:-0}"
 SCALE="${SCALE:-none}"
 
-# Matches the baseline's fit size so the two clusterings are comparable. The 2-D fit is
-# far cheaper than the 16-D one, so 'all' is more realistic here than it was there -- but
-# changing it changes what is being compared.
-FIT_ROWS="${FIT_ROWS:-5000000}"
+# 'all' -- fit on every deduplicated locus, not a 5M subsample.
+#
+# 5M was a constraint of the 16-D + UMAP path (cuML UMAP's kNN graph, plus a 65-minute
+# approximate_predict per cell over 157M rows, times 480 cells). None of that applies
+# here: there is no UMAP graph, the space is 2-D, and there is ONE cell.
+#
+# It also costs real signal. Fitting on 5M of ~157.5M is a 3.2% sample, so a genuine
+# cluster of 30,000 loci contributes ~950 rows to the fit -- under min_cluster_size, so
+# it vanishes. Anything rarer is invisible. Rare mutational processes are the point.
+#
+# If it OOMs (the estimate stage 2 prints will say so first), walk it down:
+#   FIT_ROWS=50000000  ->  25000000  ->  10000000
+# and prefer running when the trainer is idle so the whole card is available:
+#   GPU_TOTAL_GB=40 TRAINER_GPU_GB=0 STAGE=2 bash latent2d_test/run_latent2d.sh
+FIT_ROWS="${FIT_ROWS:-all}"
 PREDICT_BATCH="${PREDICT_BATCH:-5000000}"
 EMBED_BATCH="${EMBED_BATCH:-262144}"
 SIL_EVAL_ROWS="${SIL_EVAL_ROWS:-50000}"
@@ -274,10 +308,10 @@ stage2_cluster() {
     python "$LATENT2D_DIR/latent2d_cluster.py" \
         --embed-dir "$EMBED_DIR" \
         --output-root "$CLUSTER_OUT" \
-        --min-cluster-sizes "$MIN_CLUSTER_SIZES" \
+        --min-cluster-sizes "$MIN_CLUSTER_SIZE" \
         --min-samples "$MIN_SAMPLES" \
-        --cluster-selection-methods "$SELECTION_METHODS" \
-        --cluster-selection-epsilons "$SELECTION_EPSILONS" \
+        --cluster-selection-methods "$SELECTION_METHOD" \
+        --cluster-selection-epsilons "$SELECTION_EPSILON" \
         --scale "$SCALE" \
         --fit-rows "$FIT_ROWS" \
         --predict-batch-size "$PREDICT_BATCH" \
@@ -323,8 +357,8 @@ main() {
         echo "  epochs      : $EPOCH_CEILING (patience=$PATIENCE, shards=$EPOCH_SHARDS)"
         ;;
       2)
-        echo "  HDBSCAN grid: mcs=$MIN_CLUSTER_SIZES  min_samples=$MIN_SAMPLES"
-        echo "                selection=$SELECTION_METHODS  epsilon=$SELECTION_EPSILONS  scale=$SCALE"
+        echo "  HDBSCAN     : mcs=$MIN_CLUSTER_SIZE  min_samples=$MIN_SAMPLES"
+        echo "                selection=$SELECTION_METHOD  epsilon=$SELECTION_EPSILON  scale=$SCALE"
         echo "  fit rows    : $FIT_ROWS   predict batch: $PREDICT_BATCH"
         echo "  baseline ARI: ${AGREEMENT_REFERENCE:-<none -- no 16-D reference found>}"
         echo "  SigProfiler : $([ "$NO_SIGPROFILER" = "1" ] && echo disabled || echo "every cell (COSMIC v$COSMIC_VERSION, $GENOME_BUILD)")"
@@ -367,7 +401,11 @@ else
     uvv_launch_tmux "$SESSION" "$LOG_DIR" \
         "STAGE='$STAGE' RUN_ID='$RUN_ID' CHECKPOINT='$CHECKPOINT' \
          PARQUET_GLOB='$PARQUET_GLOB' FIT_ROWS='$FIT_ROWS' DRY_RUN='$DRY_RUN' \
-         KL_WEIGHT='$KL_WEIGHT' NO_RESUME='$NO_RESUME' NO_SIGPROFILER='$NO_SIGPROFILER' \
+         KL_WEIGHT='$KL_WEIGHT' HIDDEN_DIMS='$HIDDEN_DIMS' HIDDEN_DROPOUT='$HIDDEN_DROPOUT' \
+         MIN_CLUSTER_SIZE='$MIN_CLUSTER_SIZE' MIN_SAMPLES='$MIN_SAMPLES' \
+         SELECTION_METHOD='$SELECTION_METHOD' SELECTION_EPSILON='$SELECTION_EPSILON' \
+         SCALE='$SCALE' GPU_TOTAL_GB='$GPU_TOTAL_GB' TRAINER_GPU_GB='$TRAINER_GPU_GB' \
+         NO_RESUME='$NO_RESUME' NO_SIGPROFILER='$NO_SIGPROFILER' \
          NO_PLOT='$NO_PLOT' FORCE_CPU='$FORCE_CPU' AGREEMENT_REFERENCE='$AGREEMENT_REFERENCE' \
          NO_TMUX=1 bash '${BASH_SOURCE[0]}'"
 fi

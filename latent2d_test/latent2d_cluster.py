@@ -180,6 +180,26 @@ def latent_statistics(space: np.ndarray, collapse_std: float = 1e-3) -> dict:
     }
 
 
+def estimate_hdbscan_gpu_gb(n_rows: int, min_samples: int) -> float:
+    """Rough device-memory estimate for a cuML HDBSCAN fit, in GB.
+
+    ORDER OF MAGNITUDE, not a guarantee -- it is here so an over-large ``--fit-rows``
+    announces itself in seconds rather than as a CUDA OOM part way through the fit.
+
+    Two terms dominate, and both are linear in N:
+
+    * the kNN graph, ``N x min_samples x (float32 distance + int32 index)`` = 8 bytes each
+    * the MST edge list, condensed tree, labels, probabilities and the prediction data
+      kept for approximate_predict -- a handful of O(N) arrays, taken together as ~32 B/row
+
+    Note min_samples is the multiplier on the dominant term: at ms=25 the graph is five
+    times what ms=5 needs. That is exactly why the 16-D sweep OOMed at ms=25 and not ms=5.
+    """
+    knn_bytes = n_rows * min_samples * 8
+    tree_bytes = n_rows * 32
+    return (knn_bytes + tree_bytes) / (1024 ** 3)
+
+
 def scale_stats(fit_space: np.ndarray, mode: str) -> tuple[np.ndarray, np.ndarray] | None:
     """(offset, divisor) for ``--scale``, computed on the fit subsample only."""
     if mode == "none":
@@ -435,6 +455,25 @@ def main() -> int:
             f"(std < {stats['collapse_std_threshold']}). The clustering space is effectively "
             f"{latent_dim - len(stats['collapsed_dims'])}-D. Lower --kl-weight and retrain "
             f"before trusting any cluster below.")
+
+    # Fail-fast footprint check. apply_gpu_budget already refused to start if the slice is
+    # not free, but it does not know how big THIS fit will be -- and the whole point of
+    # --fit-rows all is to push N as high as the card allows, so being told the number
+    # before the fit starts is the difference between a 10-second answer and an OOM an
+    # hour in.
+    grid_min_samples = max(parse_int_csv(args.min_samples))
+    estimated_gb = estimate_hdbscan_gpu_gb(fit_space.shape[0], grid_min_samples)
+    budget_gb = budget_report.get("budget_gb") if isinstance(budget_report, dict) else None
+    log(f"HDBSCAN fit footprint: ~{estimated_gb:.1f} GB estimated for "
+        f"{fit_space.shape[0]:,} rows at min_samples={grid_min_samples}"
+        + (f" (budget {budget_gb:.1f} GB)" if isinstance(budget_gb, (int, float)) else ""))
+    if use_gpu and isinstance(budget_gb, (int, float)) and estimated_gb > budget_gb:
+        affordable = int(budget_gb * (1024 ** 3) / (grid_min_samples * 8 + 32))
+        log(f"  !! This is likely to OOM. The estimate is rough, so it is a warning rather "
+            f"than a refusal -- but roughly {affordable:,} rows fit in {budget_gb:.1f} GB "
+            f"at min_samples={grid_min_samples}.")
+        log(f"     Either cap the fit:  --fit-rows {affordable // 1_000_000 * 1_000_000}")
+        log(f"     or give it the card: GPU_TOTAL_GB=40 TRAINER_GPU_GB=0 (trainer must be idle)")
 
     agreement_rows = min(args.agreement_rows, total_rows)
     agreement_index = np.sort(
