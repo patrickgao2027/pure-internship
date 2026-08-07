@@ -9,9 +9,10 @@
 #      another job still owns the card -- the script parks itself and starts on its own.
 #   2. Runs a TRIAL: two fit sizes, one graph config, every training objective, one
 #      replicate. Two sizes is the minimum that pins the UMAP fit scaling exponent, and
-#      running all three objectives costs only their training time because they share the
-#      one fit. This is what answers "is kNN-overlap acceptable" and "what does the UMAP
-#      loss phase actually cost".
+#      running both objectives costs only their training time because they share the one
+#      fit. This is what answers "is kNN-overlap acceptable" and "what does the UMAP loss
+#      phase actually cost". regress is excluded -- it already failed at 0.055 kNN-overlap,
+#      and hybrid's warm-start phase is a regression fit, so the contrast is still visible.
 #   3. PROJECTS the full grid from those measured timings and checks it against MAX_HOURS.
 #   4. Runs the FULL SWEEP only if the projection fits the budget and the trial's encoders
 #      were actually usable.
@@ -50,7 +51,7 @@ SEEDS="${SEEDS:-3}"
 SIZES="${SIZES:-2000000,5000000,10000000,25000000}"
 MIN_DIST="${MIN_DIST:-0.0,0.1,0.25}"
 NN="${NN:-15,30,50}"
-MODES="${MODES:-regress,umap,hybrid}"
+MODES="${MODES:-umap,hybrid}"
 AUTO_RUN="${AUTO_RUN:-1}"
 TRIAL_ONLY="${TRIAL_ONLY:-0}"
 

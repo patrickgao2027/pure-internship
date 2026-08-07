@@ -87,24 +87,25 @@ edges; head, tail and a float64 cumulative weight would be ~13 GB of device memo
 cuML's own footprint. ``--max-edges`` takes a uniform random subset above that, which leaves
 the within-subset sampling distribution proportional to edge weight exactly as before.
 
-**regress is kept despite being known-bad.** It scored 0.055 at min_dist=0.0 and costs ~10 s,
-and the interesting question is whether that failure is specific to min_dist=0.0 -- where
-UMAP packs each island so tightly that an MSE fit lands every point near its cluster centre.
-At min_dist=0.25 the islands are not packed that way. A cheap control that might change sign
-across the grid earns its place.
+**regress is not swept.** It scored 0.055 at min_dist=0.0 -- MSE against coordinates that are
+arbitrary inside a packed island pulls every point toward its cluster centre. It stays a
+selectable mode (``--modes regress,umap,hybrid``) because it is cheap and its failure might
+be specific to min_dist=0.0, but it is off by default: the sweep exists to choose between the
+two objectives that could plausibly win, and ``hybrid`` already carries a regression phase as
+its warm start, so the regress→UMAP contrast is visible without spending grid cells on it.
 
     python umap_hdbscan_sweep/parametric_sweep.py \\
         --embed-dir <stage1-output> \\
         --output-dir umap_hdbscan_sweep/umap_tests/parametric_sweep \\
         --fit-rows 2000000,5000000,10000000,25000000 \\
         --min-dist 0.0,0.1,0.25 --n-neighbors 15,30,50 \\
-        --modes regress,umap,hybrid --seeds 3 --gpu-budget-gb 40
+        --modes umap,hybrid --seeds 3 --gpu-budget-gb 40
 
 Planning a run from a completed trial, without touching the GPU::
 
     python umap_hdbscan_sweep/parametric_sweep.py --plan-from <trial>/parametric_sweep.json \\
         --fit-rows 2000000,5000000,10000000,25000000 \\
-        --min-dist 0.0,0.1,0.25 --n-neighbors 15,30,50 --modes regress,umap,hybrid --seeds 3
+        --min-dist 0.0,0.1,0.25 --n-neighbors 15,30,50 --modes umap,hybrid --seeds 3
 """
 from __future__ import annotations
 
@@ -739,8 +740,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n-neighbors", default="15,30,50",
                         help="size-coupled, which is why it is swept here against fit size "
                              "rather than pinned as in sweep 1")
-    parser.add_argument("--modes", default="regress,umap,hybrid",
-                        help="training objectives; all share one UMAP fit per cell")
+    parser.add_argument("--modes", default="umap,hybrid",
+                        help="training objectives; all share one UMAP fit per cell. regress is "
+                             "selectable but off by default -- it scored 0.055 kNN-overlap and "
+                             "hybrid already contains a regression warm start")
     parser.add_argument("--seeds", type=int, default=3,
                         help="replicates; each redraws the fit rows and every seed. 2 is the "
                              "minimum for a reproducibility number, 3 shows outliers")
