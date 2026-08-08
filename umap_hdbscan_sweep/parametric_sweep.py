@@ -782,6 +782,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--infer-batch-size", type=int, default=2_000_000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--gpu-budget-gb", type=float, default=None)
+    parser.add_argument("--rmm-share", type=float, default=None,
+                        help="fraction of the GPU budget given to the RMM pool (cuML). "
+                             "Default is 0.5 (stage 'apply'). Use 0.85 to give cuML more "
+                             "headroom for large nn50 fits while keeping enough for the "
+                             "tiny parametric encoder.")
+    parser.add_argument("--resume-from", type=Path, default=None,
+                        help="path to a partial JSON from a previous run. Cells already "
+                             "present in that file are skipped (their data is loaded "
+                             "instead). Lets you continue after an OOM without re-running "
+                             "completed work.")
     return parser.parse_args()
 
 
@@ -809,9 +819,11 @@ def main() -> int:
 
     use_gpu = core.gpu_available()
     if use_gpu and args.gpu_budget_gb is not None:
-        # "apply" splits the budget: cuML fits the UMAP and torch trains the encoder, both
-        # live in this one process, so neither allocator may take the whole card.
-        core.apply_gpu_budget("apply", budget_gb=args.gpu_budget_gb)
+        # "apply" splits the budget 50/50 by default. Pass --rmm-share > 0.5 to give cuML
+        # more headroom for large nn50 graphs; the parametric encoder is tiny (~100K params)
+        # and needs far less than 50% of the card.
+        core.apply_gpu_budget("apply", budget_gb=args.gpu_budget_gb,
+                              rmm_share=args.rmm_share)
 
     import torch
 
@@ -871,6 +883,42 @@ def main() -> int:
     transform_seconds_all: list[float] = []
     reference_seconds_all: list[float] = []
     mode_seconds: dict[str, list[float]] = {mode: [] for mode in args.modes}
+
+    # completed_cells tracks which (replicate, size, config) combos are already done so
+    # the main loop can skip them. Keys are "rep{r}|{size}|{config}".
+    completed_cells: set[str] = set()
+
+    if args.resume_from is not None:
+        prior = json.loads(Path(args.resume_from).read_text())
+        prior_summaries = prior.get("summaries", {})
+        prior_completed = prior.get("_completed_cells", [])
+        completed_cells = set(prior_completed)
+        # Reconstruct per-replicate cell lists from the aggregated summaries so the
+        # aggregation pass at the end sees the right replicate counts. Each summary
+        # entry already holds mean values; we inject one synthetic replicate per
+        # recorded replicate count so the averages are preserved exactly.
+        for key, summary in prior_summaries.items():
+            n_rep = summary.get("replicates", 1)
+            for mode in args.modes:
+                mode_key = key if key.endswith(f"|{mode}") else None
+                if mode_key is None:
+                    continue
+                result = {
+                    "distillation": summary.get("distillation", {}),
+                    "map_quality_net": summary.get("map_quality_net", {}),
+                    "generalisation": summary.get("generalisation", {}),
+                    "clustering": summary.get("clustering", {}),
+                    "step_curve": summary.get("step_curve", []),
+                    "timing": summary.get("timing", {}),
+                    "_from_resume": True,
+                }
+                for _ in range(n_rep):
+                    cells.setdefault(mode_key, []).append(result)
+                    reference_by_cell.setdefault(mode_key, []).append(
+                        summary.get("reference_cuml") or {})
+        n_skipped = len(completed_cells)
+        log(f"resume: loaded {len(prior_summaries)} summaries, "
+            f"will skip {n_skipped} already-completed (replicate, size, config) combos")
 
     def aggregate() -> dict:
         summaries = {}
@@ -951,6 +999,12 @@ def main() -> int:
         for size in sizes:
             fit_index = fit_sets[size]
             for config in graph_configs:
+                resume_key = f"rep{replicate}|{size}|{config.label()}"
+                if resume_key in completed_cells:
+                    done += 1
+                    log(f"  {format_rows(size)} rows, {config.label()} -- skipped (already done)")
+                    continue
+
                 seeded = core.UmapConfig(
                     **{**config.as_dict(), "seed": args.seed + replicate})
                 log(f"  {format_rows(size)} rows, {config.label()} ...")
@@ -975,6 +1029,7 @@ def main() -> int:
                     cells.setdefault(key, []).append(result)
                     reference_by_cell.setdefault(key, []).append(cell.get("reference", {}))
 
+                completed_cells.add(resume_key)
                 done += 1
                 elapsed = perf_counter() - started_all
                 log(f"    cell {done}/{total_cells}, elapsed {elapsed / 60:.0f} min, "
@@ -982,8 +1037,9 @@ def main() -> int:
 
                 # Checkpoint after every cell so a crash at hour 18 loses at most one cell.
                 try:
-                    partial_path.write_text(
-                        json.dumps(build_payload(aggregate(), complete=False), indent=2))
+                    payload_partial = build_payload(aggregate(), complete=False)
+                    payload_partial["_completed_cells"] = sorted(completed_cells)
+                    partial_path.write_text(json.dumps(payload_partial, indent=2))
                 except Exception as error:
                     log(f"  WARNING: could not write checkpoint: {error}")
 
