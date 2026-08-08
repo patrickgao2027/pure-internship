@@ -408,6 +408,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-coords", action="store_true",
                         help="also write the full 157.5M x 2 float32 array (~1.3 GB per cell)")
 
+    parser.add_argument("--density-only", action="store_true",
+                        help="just the embedding: write density.png and stop. Skips HDBSCAN "
+                             "and clusters.png. Use this to look at the space before "
+                             "committing to a clusterer's opinion of it")
     parser.add_argument("--cluster-rows", type=int, default=5_000_000,
                         help="cuML HDBSCAN does not survive much past this on one card")
     parser.add_argument("--min-cluster-size", type=int, default=250)
@@ -483,13 +487,17 @@ def main() -> int:
         plot_density(hist, edges, cell_dir / "density.png", f"full cohort density -- {title}")
         log(f"    wrote density.png")
 
-        separability, coords_sub, labels_sub = assess_separability(model, latent, args, use_gpu)
-        plot_clusters(coords_sub, labels_sub, cell_dir / "clusters.png",
-                      f"HDBSCAN on {separability['cluster_rows']:,} rows -- {key}",
-                      seed=args.seed)
-        log(f"    wrote clusters.png -- {separability['n_clusters']} clusters, "
-            f"noise {separability['noise_fraction'] * 100:.1f}%, "
-            f"largest {(separability['largest_cluster_fraction'] or 0) * 100:.1f}%")
+        if args.density_only:
+            separability = None
+        else:
+            separability, coords_sub, labels_sub = assess_separability(
+                model, latent, args, use_gpu)
+            plot_clusters(coords_sub, labels_sub, cell_dir / "clusters.png",
+                          f"HDBSCAN on {separability['cluster_rows']:,} rows -- {key}",
+                          seed=args.seed)
+            log(f"    wrote clusters.png -- {separability['n_clusters']} clusters, "
+                f"noise {separability['noise_fraction'] * 100:.1f}%, "
+                f"largest {(separability['largest_cluster_fraction'] or 0) * 100:.1f}%")
 
         record = {
             "generated_utc": datetime.now(timezone.utc).isoformat(),
@@ -515,7 +523,8 @@ def main() -> int:
             "density_extent": {"x": list(extent[0]), "y": list(extent[1]),
                                "bins": args.bins},
         }
-        (cell_dir / "separability.json").write_text(json.dumps(record, indent=2))
+        (cell_dir / ("embedding.json" if args.density_only else "separability.json")).write_text(
+            json.dumps(record, indent=2))
         index.append(record)
 
         del model
@@ -529,20 +538,34 @@ def main() -> int:
     }, indent=2))
 
     print("\n" + "=" * 96)
-    print("FULL-COHORT APPLY -- is the 2-D space separable?")
-    print("=" * 96)
-    print(f"  {'cell':<42}{'clusters':>9}{'noise':>8}{'largest':>9}{'silh':>8}{'embed_min':>11}")
-    for record in index:
-        s = record["separability"]
-        print(f"  {record['cell']:<42}{s['n_clusters']:>9}"
-              f"{s['noise_fraction'] * 100:>7.1f}%"
-              f"{(s['largest_cluster_fraction'] or 0) * 100:>8.1f}%"
-              f"{(s['silhouette'] if s['silhouette'] is not None else float('nan')):>8.3f}"
-              f"{record['timing']['full_embed_seconds'] / 60:>11.1f}")
-    print()
-    print("  Read it as: many clusters with low noise and a largest-cluster share well under")
-    print("  half means the space genuinely splits. One dominant cluster plus high noise means")
-    print("  HDBSCAN found a blob and some dust, whatever the cluster count says.")
+    if args.density_only:
+        print("FULL-COHORT EMBEDDING -- density only, no clustering")
+        print("=" * 96)
+        print(f"  {'cell':<42}{'rows':>15}{'clipped':>10}{'embed_min':>11}")
+        for record in index:
+            print(f"  {record['cell']:<42}{record['finite_rows']:>15,}"
+                  f"{record['clipped_to_extent_rows']:>10,}"
+                  f"{record['timing']['full_embed_seconds'] / 60:>11.1f}")
+        print()
+        print("  density.png is every row as a log-scaled histogram. Look for basins separated")
+        print("  by genuinely empty space -- a low-density bridge between two lobes means a")
+        print("  clusterer will have to choose, and different ones will choose differently.")
+        print("  Rerun without --density-only to get HDBSCAN's answer.")
+    else:
+        print("FULL-COHORT APPLY -- is the 2-D space separable?")
+        print("=" * 96)
+        print(f"  {'cell':<42}{'clusters':>9}{'noise':>8}{'largest':>9}{'silh':>8}{'embed_min':>11}")
+        for record in index:
+            s = record["separability"]
+            print(f"  {record['cell']:<42}{s['n_clusters']:>9}"
+                  f"{s['noise_fraction'] * 100:>7.1f}%"
+                  f"{(s['largest_cluster_fraction'] or 0) * 100:>8.1f}%"
+                  f"{(s['silhouette'] if s['silhouette'] is not None else float('nan')):>8.3f}"
+                  f"{record['timing']['full_embed_seconds'] / 60:>11.1f}")
+        print()
+        print("  Read it as: many clusters with low noise and a largest-cluster share well under")
+        print("  half means the space genuinely splits. One dominant cluster plus high noise means")
+        print("  HDBSCAN found a blob and some dust, whatever the cluster count says.")
     print("=" * 96 + "\n")
     return 0
 
