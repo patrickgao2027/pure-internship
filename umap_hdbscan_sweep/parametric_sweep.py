@@ -445,6 +445,16 @@ def run_cell(
         net_probe = model.transform(probe_latent, batch_size=args.infer_batch_size)
         infer_seconds = perf_counter() - started
 
+        # Persist the encoder so downstream work (embedding the full cohort) does not have
+        # to refit UMAP and retrain to get this exact network back. Off by default: 108
+        # cells x 3 modes x ~400 KB is small, but only some runs want it.
+        if args.encoder_dir is not None:
+            encoder_path = (
+                Path(args.encoder_dir)
+                / f"{fit_rows}__{config.label()}__{mode}__seed{config.seed}.pt")
+            encoder_path.parent.mkdir(parents=True, exist_ok=True)
+            model.save(encoder_path)
+
         if not np.isfinite(net_probe).all():
             bad = int((~np.isfinite(net_probe)).any(axis=1).sum())
             log(f"      {mode}: FAILED, {bad:,} non-finite rows")
@@ -782,6 +792,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--infer-batch-size", type=int, default=2_000_000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--gpu-budget-gb", type=float, default=None)
+    parser.add_argument("--encoder-dir", default=None,
+                        help="if given, write each trained encoder here as "
+                             "<rows>__<config>__<mode>__seed<n>.pt. Lets apply_parametric_full.py "
+                             "reuse the exact network instead of refitting UMAP and retraining.")
     parser.add_argument("--rmm-share", type=float, default=None,
                         help="fraction of the GPU budget given to the RMM pool (cuML); the "
                              "rest goes to torch. Default 0.5 (stage 'apply') splits evenly, "
