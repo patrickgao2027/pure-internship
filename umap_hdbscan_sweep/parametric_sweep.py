@@ -980,16 +980,12 @@ def main() -> int:
                 log(f"    cell {done}/{total_cells}, elapsed {elapsed / 60:.0f} min, "
                     f"eta {(elapsed / done) * (total_cells - done) / 60:.0f} min")
 
-        # Checkpoint after every replicate. The full grid runs for the better part of a day,
-        # and a crash at hour 18 with nothing on disk would be unrecoverable; this costs one
-        # aggregation pass per replicate and bounds the loss at one replicate's work.
-        # Written under a partial name so nothing downstream mistakes it for a finished run.
-        try:
-            partial_path.write_text(json.dumps(build_payload(aggregate(), complete=False), indent=2))
-            log(f"  checkpoint written to {partial_path.name} "
-                f"(replicate {replicate + 1}/{args.seeds} complete)")
-        except Exception as error:      # a failed checkpoint must never kill the sweep
-            log(f"  WARNING: could not write checkpoint: {error}")
+                # Checkpoint after every cell so a crash at hour 18 loses at most one cell.
+                try:
+                    partial_path.write_text(
+                        json.dumps(build_payload(aggregate(), complete=False), indent=2))
+                except Exception as error:
+                    log(f"  WARNING: could not write checkpoint: {error}")
 
     log("=== aggregating across replicates ===")
     payload = build_payload(aggregate(), complete=True)
