@@ -425,21 +425,61 @@ main() {
     uvv_rule
 }
 
+# ── Re-exec into tmux ───────────────────────────────────────────────────────
+# Everything the "Configuration" block above reads from the environment has to be handed
+# to the inner invocation, because that invocation is a FRESH shell that re-runs this
+# whole file -- anything missing here silently falls back to its default. This used to be
+# a hand-written list of ~25 names, and the ones it omitted were not harmless:
+# CLUSTER_OUT sent output to the default directory, and SEED changed the fit subsample and
+# the metric tiers, i.e. a silent reproducibility break. So the list is generated from the
+# variables the configuration block actually defines; keep them in sync when adding one.
+#
+# SESSION and NO_TMUX are deliberately absent: the first is consumed by the launcher out
+# here, and the second is set to 1 below to stop the inner shell re-exec'ing again.
+UVV_PASSTHROUGH_VARS="
+    UV_VAE_DIR SWEEP_DIR LATENT2D_DIR EARLY_STOPPING_DIR
+    STAGE RUN_ID RUN_ROOT ROW_FILTER SEED PARQUET_GLOB FEATURE_SPEC CHECKPOINT
+    BASELINE_ROOT BASELINE_CELL AGREEMENT_ROWS AGREEMENT_REFERENCE
+    REFERENCE_LATENT REFERENCE_COORDINATES
+    DEDUP_DIR DEDUP_REUSED EMBED_DIR CLUSTER_OUT TRAIN_ROOT
+    DUCKDB_MEMORY TEMP_DIR CHROMOSOMES
+    KL_WEIGHT HIDDEN_DIMS HIDDEN_DROPOUT DECODE_WORKERS BATCH_SIZE LEARNING_RATE
+    EPOCH_CEILING EPOCH_SHARDS PATIENCE INPUT_DROPOUT
+    MIN_CLUSTER_SIZE MIN_SAMPLES SELECTION_METHOD SELECTION_EPSILON SCALE
+    FIT_ROWS PREDICT_BATCH EMBED_BATCH
+    KNN_ROWS PAIR_ROWS DISTANCE_PAIRS METRIC_K METRIC_K_MAX PLOT_ROWS
+    GPU_TOTAL_GB TRAINER_GPU_GB SWEEP_GPU_GB
+    COSMIC_VERSION GENOME_BUILD NO_SIGPROFILER NO_PLOT DRY_RUN NO_RESUME FORCE_CPU
+"
+
+# Single-quote a value so it survives the extra shell parse tmux puts it through.
+# ROW_FILTER is the reason this cannot be a plain "NAME='$VALUE'": its default
+# (st = 'MIXED' AND ...) contains single quotes, which would close the quoting early and
+# corrupt the rest of the command line.
+#
+# The pattern and replacement are held in variables rather than written inline: spelling
+# the '\'' idiom directly inside the expansion makes bash process the backslashes twice
+# and silently yields '\\ instead, which fails only on values that contain a quote.
+uvv_shell_quote() {
+    local single="'" escaped="'\\''"
+    local quoted=${1//$single/$escaped}
+    printf "'%s'" "$quoted"
+}
+
+uvv_env_prefix() {
+    local name value prefix=""
+    for name in $UVV_PASSTHROUGH_VARS; do
+        value="${!name-}"
+        prefix="$prefix $name=$(uvv_shell_quote "$value")"
+    done
+    printf '%s' "$prefix"
+}
+
 if [ "$NO_TMUX" = "1" ] || [ -n "${TMUX:-}" ]; then
     uvv_run_main "$LOG_DIR" main
 else
     uvv_strip_crlf "$UV_VAE_DIR/scripts/tmux_lib.sh" "$LATENT2D_DIR/run_latent2d.sh"
     mkdir -p "$LOG_DIR"
     uvv_launch_tmux "$SESSION" "$LOG_DIR" \
-        "STAGE='$STAGE' RUN_ID='$RUN_ID' CHECKPOINT='$CHECKPOINT' \
-         PARQUET_GLOB='$PARQUET_GLOB' FIT_ROWS='$FIT_ROWS' DRY_RUN='$DRY_RUN' \
-         KL_WEIGHT='$KL_WEIGHT' HIDDEN_DIMS='$HIDDEN_DIMS' HIDDEN_DROPOUT='$HIDDEN_DROPOUT' \
-         MIN_CLUSTER_SIZE='$MIN_CLUSTER_SIZE' MIN_SAMPLES='$MIN_SAMPLES' \
-         SELECTION_METHOD='$SELECTION_METHOD' SELECTION_EPSILON='$SELECTION_EPSILON' \
-         SCALE='$SCALE' GPU_TOTAL_GB='$GPU_TOTAL_GB' TRAINER_GPU_GB='$TRAINER_GPU_GB' \
-         REFERENCE_LATENT='$REFERENCE_LATENT' REFERENCE_COORDINATES='$REFERENCE_COORDINATES' \
-         KNN_ROWS='$KNN_ROWS' PAIR_ROWS='$PAIR_ROWS' METRIC_K_MAX='$METRIC_K_MAX' \
-         NO_RESUME='$NO_RESUME' NO_SIGPROFILER='$NO_SIGPROFILER' \
-         NO_PLOT='$NO_PLOT' FORCE_CPU='$FORCE_CPU' AGREEMENT_REFERENCE='$AGREEMENT_REFERENCE' \
-         NO_TMUX=1 bash '${BASH_SOURCE[0]}'"
+        "$(uvv_env_prefix) NO_TMUX=1 bash $(uvv_shell_quote "${BASH_SOURCE[0]}")"
 fi

@@ -459,7 +459,24 @@ def persist_clusterer(clusterer: object, path: Path) -> str | None:
         return None
 
 
-def completed_payload(metrics_path: Path) -> dict | None:
+def cell_name(config: core.HdbscanConfig, scale: str) -> str:
+    """Directory name for one grid cell.
+
+    ``config.label()`` is left exactly as it is on purpose: ``sweep_core`` documents it as
+    load-bearing, because the 16-D sweep resumes by matching those directory names and a
+    changed label would silently re-run every completed cell into a new directory.
+
+    ``--scale`` still has to reach the name from somewhere, though. It is a property of the
+    clustering SPACE rather than of the HDBSCAN configuration, so it is appended here
+    instead of being pushed into ``HdbscanConfig``. An unscaled run therefore keeps the
+    historical name and resumes into the existing ``mcs1000_ms25``; a standardised run gets
+    its own directory rather than landing on top of the unscaled result and being skipped
+    as already complete.
+    """
+    return config.label() if scale == "none" else f"{config.label()}_scale-{scale}"
+
+
+def completed_payload(metrics_path: Path, scale: str) -> dict | None:
     """A finished cell's payload, or None if it needs (re-)running."""
     if not metrics_path.exists():
         return None
@@ -467,7 +484,15 @@ def completed_payload(metrics_path: Path) -> dict | None:
         payload = json.loads(metrics_path.read_text())
     except json.JSONDecodeError:
         return None  # killed mid-write
-    return None if "error" in payload else payload
+    if "error" in payload:
+        return None
+    # Defence in depth behind cell_name(). Payloads written before the scale reached the
+    # directory name can be sitting in a directory this run would otherwise claim as its
+    # own, and reusing one would attribute the wrong clustering space to these results.
+    # Re-running is the only safe answer; the scale has been in the payload all along.
+    if payload.get("scale", "none") != scale:
+        return None
+    return payload
 
 
 def build_grid(args: argparse.Namespace) -> list[core.HdbscanConfig]:
@@ -529,7 +554,7 @@ def main() -> int:
 
     if args.dry_run:
         for config in grid:
-            log(f"  HDBSCAN {config.label()}")
+            log(f"  HDBSCAN {cell_name(config, args.scale)}")
         log(f"Dry run: {len(grid)} cells would run. Nothing was fit.")
         return 0
 
@@ -650,9 +675,10 @@ def main() -> int:
 
     cells: list[dict] = []
     for config in grid:
-        cell_dir = output_root / config.label()
+        label = cell_name(config, args.scale)
+        cell_dir = output_root / label
         metrics_path = cell_dir / "metrics.json"
-        already = completed_payload(metrics_path) if args.resume else None
+        already = completed_payload(metrics_path, args.scale) if args.resume else None
         if already is not None:
             path = already.get("agreement_labels_path")
             if path and Path(path).exists():
@@ -668,7 +694,7 @@ def main() -> int:
                     )
                     metrics_path.write_text(json.dumps(already, indent=2))
             cells.append(already)
-            log(f"  [{config.label()}] already complete, skipping"
+            log(f"  [{label}] already complete, skipping"
                 + (f" (backfilled ARI_vs_ref={already['agreement_vs_reference']['adjusted_rand']:.4f})"
                    if already.get("agreement_vs_reference") else ""))
             continue
@@ -708,7 +734,7 @@ def main() -> int:
 
             agreement_path = cell_dir / "agreement_labels.npy"
             np.save(agreement_path, labels[agreement_index])
-            agreement_labels[config.label()] = labels[agreement_index]
+            agreement_labels[label] = labels[agreement_index]
 
             versus_reference = None
             if reference_labels is not None:
@@ -731,7 +757,7 @@ def main() -> int:
                 plot_path = plot_latent_clusters(
                     space, labels, cell_dir / "latent_clusters.png",
                     plot_rows=args.plot_rows, seed=args.seed,
-                    title=f"2-D VAE latent, HDBSCAN {config.label()} "
+                    title=f"2-D VAE latent, HDBSCAN {label} "
                           f"({panel['n_clusters']} clusters, "
                           f"{panel['noise_fraction']:.1%} noise)",
                 )
@@ -742,10 +768,10 @@ def main() -> int:
                     sigprofiler = run_sigprofiler(analysis_path, cell_dir, args)
                 except Exception as exc:
                     sigprofiler = {"error": f"{type(exc).__name__}: {exc}"}
-                    log(f"    [{config.label()}] SigProfiler failed: {exc}")
+                    log(f"    [{label}] SigProfiler failed: {exc}")
 
             payload = {
-                "cell": config.label(),
+                "cell": label,
                 "hdbscan": config.as_dict(),
                 "space": "vae_latent",
                 "space_shape": list(space.shape),
@@ -767,7 +793,7 @@ def main() -> int:
             }
             metrics_path.write_text(json.dumps(payload, indent=2))
             cells.append(payload)
-            log(f"  [{config.label()}] {panel['n_clusters']} clusters  "
+            log(f"  [{label}] {panel['n_clusters']} clusters  "
                 f"noise={panel['noise_fraction']:.3f}  dbcv={fitted.dbcv}  "
                 f"sil={panel['silhouette']}"
                 + (f"  ARI_vs_ref={versus_reference['adjusted_rand']:.4f}"
@@ -778,15 +804,16 @@ def main() -> int:
                 + f"  ({payload['seconds']}s)")
         except Exception as exc:
             payload = {
-                "cell": config.label(),
+                "cell": label,
                 "hdbscan": config.as_dict(),
+                "scale": args.scale,
                 "error": f"{type(exc).__name__}: {exc}",
                 "traceback": traceback.format_exc(),
                 "seconds": round(perf_counter() - cell_started, 1),
             }
             metrics_path.write_text(json.dumps(payload, indent=2))
             cells.append(payload)
-            log(f"  [{config.label()}] FAILED: {type(exc).__name__}: {exc}")
+            log(f"  [{label}] FAILED: {type(exc).__name__}: {exc}")
         finally:
             # Release this cell's clusterer before the next fit allocates. With
             # prediction_data=True each one holds a per-row structure on the GPU, which at
