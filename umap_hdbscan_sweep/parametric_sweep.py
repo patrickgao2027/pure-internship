@@ -969,16 +969,31 @@ def main() -> int:
 
     partial_path = output_dir / "parametric_sweep_partial.json"
 
+    # Every replicate's fit sets, drawn once. Each draw permutes the whole ~157 M-row pool,
+    # so doing it inside the loop would repeat 1.3 GB of shuffling for every cell.
+    log(f"drawing fit sets for {args.seeds} replicate(s) ...")
+    fit_sets_by_replicate = [
+        draw_nested_fit_sets(pool, sizes, args.seed, replicate)
+        for replicate in range(args.seeds)
+    ]
+
+    # Replicate is the INNERMOST loop, deliberately. Family E -- agreement between
+    # independently trained encoders -- is the only thing here that cannot be computed from
+    # a single replicate, and it is the number the sweep exists to produce. With replicate
+    # outermost, a crash anywhere in the first pass leaves every cell at one replicate and
+    # family E empty no matter how much finished; that happened three runs in a row. This
+    # order finishes all replicates of one cell before starting the next, so an interrupted
+    # run yields fewer cells but every completed cell carries its reproducibility number.
     done = 0
-    for replicate in range(args.seeds):
-        fit_sets = draw_nested_fit_sets(pool, sizes, args.seed, replicate)
-        log(f"=== replicate {replicate + 1}/{args.seeds} ===")
-        for size in sizes:
-            fit_index = fit_sets[size]
-            for config in graph_configs:
+    for size in sizes:
+        for config in graph_configs:
+            log(f"=== {format_rows(size)} rows, {config.label()} "
+                f"({args.seeds} replicate(s)) ===")
+            for replicate in range(args.seeds):
+                fit_index = fit_sets_by_replicate[replicate][size]
                 seeded = core.UmapConfig(
                     **{**config.as_dict(), "seed": args.seed + replicate})
-                log(f"  {format_rows(size)} rows, {config.label()} ...")
+                log(f"  replicate {replicate + 1}/{args.seeds} ...")
                 cell = run_cell(size, seeded, latent, fit_index, probe_latent,
                                 tiers, args, use_gpu, device)
 
