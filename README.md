@@ -266,3 +266,58 @@ It was a bad idea to just do sweeps through all the potential parameters for UMA
 
 Parametric UMAP sources:
 https://pmc.ncbi.nlm.nih.gov/articles/PMC8516496/
+https://umap-learn.readthedocs.io/en/latest/parametric_umap.html    
+https://arxiv.org/abs/2009.12981
+https://github.com/timsainb/ParametricUMAP_paper/
+original UMAP  
+https://arxiv.org/pdf/1802.03426
+Metrics to use to compare different UMAP embeddings:
+Jaccard Score, Trustworthiness (extent to which local structure is maintained), Davies-Boudin Score (average similarity of cluster to most similar cluster, similarity calculated as ratio of within cluster distance to between cluster distance), Calinski Harabasz Score (), Area Under the Curve (AUC) of RNX 
+Sources: 
+https://scikit-learn.org/stable/modules/generated/sklearn.metrics.davies_bouldin_score.html  
+https://scikit-learn.org/stable/modules/generated/sklearn.manifold.trustworthiness.html  
+https://scikit-learn.org/stable/modules/generated/sklearn.metrics.calinski_harabasz_score.html
+https://www.sciencedirect.com/science/article/pii/S0925231215003641
+
+8/6 Testing Plan
+Checked parametric UMAP code yesterday and learned how the UMAP algorithm really works.
+Today I will settle on an input size for the UMAP, see if the data input eventually converges to a stable point
+    1. Test data inputs 1M, 2.5M, 5M, 10M, 25M, 50M and see how long it takes to train
+    2. Check with metrics trustworthiness, continuity, spearman pearson correlation, procrustes
+
+8/6 – 8/10: 2D VAE Latent Experiment (no UMAP)
+Instead of settling UMAP first, tested whether the VAE's 2D latent space alone (without UMAP projection) can support direct HDBSCAN clustering.  Model: same 95-sample cohort checkpoint (run_20260806T132009Z, latent_dim=2, hidden=[256,128,64,16], β=0.01, 157,501,580 loci embedded).
+
+Latent space stats: dim0 std=0.703 (var share 35.4%), dim1 std=0.950 (var share 64.6%).  Both dims alive (collapsed_dims=[]), but anisotropic and showing a cross-shaped filament structure — vertical arm at latent1≈0 suggesting conditional posterior collapse in dim0 for a large subpopulation.
+
+## 2D Latent HDBSCAN Parameter Grid
+
+Swept min_samples (5, 25) × cluster_selection_method (eom, leaf), min_cluster_size fixed at 1000, metric=euclidean.  HDBSCAN fit on 5M rows (GPU memory limit), remaining 152.5M assigned via approximate_predict.  Backend: cuML GPU.
+
+### Results — noise-contaminated (sklearn includes noise label −1 as a cluster)
+
+| Cell | Clusters | Noise % | Silhouette | Davies–Bouldin | Calinski–Harabasz |
+|---|---|---|---|---|---|
+| mcs1000_ms5 (eom) | 346 | 52.7% | −0.297 | 2.385 | 389,765 |
+| mcs1000_ms25 (eom) | 293 | 61.8% | −0.417 | 2.118 | 416,935 |
+| mcs1000_ms5_leaf | 1,050 | 86.0% | −0.773 | 3.926 | 27,116 |
+| mcs1000_ms25_leaf | 604 | 84.5% | −0.738 | 2.382 | 85,570 |
+
+### Results — noise excluded (recomputed from analysis.parquet, non-noise rows only)
+
+| Cell | Non-noise rows | Silhouette | Davies–Bouldin | Calinski–Harabasz |
+|---|---|---|---|---|
+| mcs1000_ms5 (eom) | 74,483,676 | **+0.434** | 0.903 | 19,401,181 |
+| mcs1000_ms25 (eom) | 60,174,009 | **+0.426** | 0.664 | 16,727,322 |
+| mcs1000_ms5_leaf | 22,006,811 | **+0.426** | 2.254 | 7,585,673 |
+| mcs1000_ms25_leaf | 24,397,092 | **+0.516** | 0.824 | 4,954,254 |
+
+All reproduction checks passed (delta=0.0): the negative silhouette values were entirely noise contamination artifacts.  The real clusters are well-separated (silhouette 0.43–0.52).  The problem is coverage: 53–86% of loci unassigned, driven by continuous density gradients in the 2D latent with no sharp gaps for HDBSCAN to exploit.
+
+**Best cell: mcs1000_ms5 (eom)** — lowest noise fraction (52.7%), most clusters (346), best coverage.  mcs1000_ms25 has the tightest clusters (DB=0.664) but assigns fewer loci.  leaf selection makes noise substantially worse (84–86%) with no improvement in cluster quality.
+
+### SigProfiler Assignment (UV-only SBS, GRCh38, v3.5)
+
+Mean cosine similarity ~0.30 across all 4 cells — nearly identical regardless of parameter choice.  Parameters move assignment rate (how many loci get a cluster), not assignment quality (how well clusters match UV signatures).  mcs1000_ms5 yielded 14.9M loci in clusters with cosine ≥ 0.7.
+
+**Conclusion:** The 2D VAE latent space forms real, well-separated clusters but leaves ~half the data as noise due to the continuous-gradient geometry of the space.  Adding UMAP before HDBSCAN (the standard pipeline) remains the expected path forward — UMAP explicitly optimises for density gaps, which is exactly what HDBSCAN needs.
