@@ -798,13 +798,10 @@ def parse_args() -> argparse.Namespace:
                              "reuse the exact network instead of refitting UMAP and retraining.")
     parser.add_argument("--rmm-share", type=float, default=None,
                         help="fraction of the GPU budget given to the RMM pool (cuML); the "
-                             "rest goes to torch. Default 0.5 (stage 'apply') splits evenly, "
-                             "which is wasteful here -- the encoder is ~100K parameters and "
-                             "never needs half the card, while cuML's UMAP fit is what OOMs. "
-                             "0.9 is the clamp in gpu_budget.resolve_rmm_share. Note this "
-                             "buys headroom, not unlimited room: a UMAP fit's peak scales "
-                             "with n_rows x n_neighbors, and 25M x nn30 exceeds this card "
-                             "at any share.")
+                             "rest goes to torch. Default 0.5 (stage 'apply'). BOTH SIDES "
+                             "CAN STARVE, and which one binds flips with fit size -- see the "
+                             "note above main(). Measured on a 47 GB card at --gpu-budget-gb "
+                             "45: 0.7 for fits up to 10M, 0.85 at 25M. 0.9 OOMs torch.")
     return parser.parse_args()
 
 
@@ -832,9 +829,19 @@ def main() -> int:
 
     use_gpu = core.gpu_available()
     if use_gpu and args.gpu_budget_gb is not None:
-        # "apply" splits the budget 50/50 by default. Pass --rmm-share > 0.5 to give cuML
-        # more headroom for large nn50 graphs; the parametric encoder is tiny (~100K params)
-        # and needs far less than 50% of the card.
+        # One budget, two allocators in this one process, and BOTH can starve. Which one
+        # binds flips with fit size, so there is no single correct share:
+        #
+        #   cuML (RMM pool) holds the kNN graph and the fuzzy simplicial set during the
+        #     fit; its peak scales with n_rows x n_neighbors. A 10M x nn30 fit needed
+        #     ~25 GB and died against a 20 GB pool.
+        #   torch holds the edge tensors for the encoder's UMAP objective -- head, tail,
+        #     and the float64 weight cumsum -- plus X and Y. That is ~5.6 GB at the 150M
+        #     --max-edges cap and is roughly FLAT in fit size, because the cap binds.
+        #
+        # So at 10M the squeeze is on torch and at 25M it is on cuML. Setting the share to
+        # 0.9 to fix the first OOM left torch 4.5 GB and killed two runs at the cumsum,
+        # with 16 GB still free on the card. Match the share to the largest fit in the run.
         core.apply_gpu_budget("apply", budget_gb=args.gpu_budget_gb,
                               rmm_share=args.rmm_share)
 
