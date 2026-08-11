@@ -67,10 +67,43 @@ def log(msg: str) -> None:
 def load_coordinates(args, latent, fit_idx: np.ndarray, probe_idx: np.ndarray):
     """2-D coordinates for the fit and probe sets, plus the seconds UMAP cost to get them.
 
-    The refit path reproduces what stage 2 does. The parquet path reuses a completed
-    cell's ``umap_1`` / ``umap_2`` columns, which are the same coordinates stage 2 handed
-    to HDBSCAN -- cheaper, but it ties the measurement to that run's UMAP config.
+    Three paths, in priority order:
+    - ``--encoder-model``  load a saved parametric encoder (.pt) and run a forward pass.
+                           This is the right choice when the chosen UMAP is the finalised
+                           parametric encoder, not a non-parametric cuML fit.
+    - ``--coords-parquet`` read umap_1 / umap_2 from a completed cell's analysis parquet.
+    - default              refit a non-parametric UMAP on the fit set (slow, for reference).
     """
+    if args.encoder_model:
+        import torch
+        import parametric_umap as pu
+
+        path = Path(args.encoder_model).resolve()
+        log(f"loading parametric encoder from {path.name}")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        blob = torch.load(path, map_location=device, weights_only=False)
+        latent_dim = latent.shape[1]
+        encoder = pu.ParametricEncoder(
+            latent_dim, output_dim=2, hidden=(256, 256, 128)
+        ).to(device)
+        encoder.load_state_dict(blob["state_dict"])
+        mode = blob.get("mode", "umap")
+        model = pu.ParametricUmap(encoder=encoder, device=device, mode=mode)
+        log(f"  encoder loaded (mode={mode}, device={device})")
+
+        all_idx = np.concatenate([fit_idx, probe_idx])
+        all_idx_sorted = np.sort(all_idx)
+        log(f"  embedding {len(all_idx_sorted):,} rows (fit + probe) ...")
+        t0 = perf_counter()
+        all_coords = model.transform(np.ascontiguousarray(latent[all_idx_sorted]))
+        seconds = perf_counter() - t0
+        log(f"  embedded in {seconds:.1f}s")
+
+        # Map back to original index order using searchsorted
+        fit_pos = np.searchsorted(all_idx_sorted, fit_idx)
+        probe_pos = np.searchsorted(all_idx_sorted, probe_idx)
+        return all_coords[fit_pos], all_coords[probe_pos], seconds, f"encoder:{path.name}"
+
     if args.coords_parquet:
         import polars as pl
 
@@ -177,6 +210,11 @@ def parse_args() -> argparse.Namespace:
                         help="the ends and middle of the swept grid (100,250,500,1000,2500). "
                              "The dispute is whether predict cost tracks cluster structure.")
     parser.add_argument("--min-samples", type=int, default=25)
+    parser.add_argument("--encoder-model", default=None,
+                        help="path to a saved parametric encoder .pt file (from "
+                             "final_models/); embeds the fit+probe rows with a forward "
+                             "pass instead of refitting UMAP. Takes priority over "
+                             "--coords-parquet.")
     parser.add_argument("--coords-parquet", default=None,
                         help="analysis parquet from a finished cell; reads its umap_1 / "
                              "umap_2 columns instead of refitting UMAP")
