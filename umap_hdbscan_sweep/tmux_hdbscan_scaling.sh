@@ -30,9 +30,9 @@ MIN_SAMPLES="${MIN_SAMPLES:-5}"
 EXTRA_MIN_SAMPLES="${EXTRA_MIN_SAMPLES:-15}"
 PROBE_SIZES="${PROBE_SIZES:-50000,200000,500000}"
 # The eval probe must be the SAME rows for every fit size -- that is what makes cross-size
-# ARI computable. Changing it part way through a sweep silently mixes two probes across the
-# resumed and new cells, so if you change it, delete cells/ and labels/ and start over.
-EVAL_PROBE_ROWS="${EVAL_PROBE_ROWS:-1000000}"
+# ARI computable. draw_signature.json enforces it: the sweep refuses to resume into a
+# directory drawn with a different probe size or seed, and tells you what to delete.
+EVAL_PROBE_ROWS="${EVAL_PROBE_ROWS:-2000000}"
 TIMING_PROBE_ROWS="${TIMING_PROBE_ROWS:-500000}"
 
 if command -v micromamba &>/dev/null; then

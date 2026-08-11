@@ -33,10 +33,17 @@ measuring it. Fit time is insensitive to mcs (457.1 / 458.5 / 457.8 s at mcs 100
 2500), so nothing in the timing result is traded away for this.
 
 **What gets saved, and why.** Every size writes its fit-set labels *and* labels for a fixed
-1 M evaluation probe that no fit set contains. The probe is the same rows every time, which
+2 M evaluation probe that no fit set contains. The probe is the same rows every time, which
 is what makes ARI/AMI between fit sizes computable later -- comparing two clusterings needs
 them to have labelled the same points. Without it the saved labels describe different row
-sets and cannot be compared at all.
+sets and cannot be compared at all. Because the proportional ``min_cluster_size`` keeps the
+smallest admissible cluster at a constant 0.01% of the fit set, the probe covers even that
+cluster with ~200 rows at *every* size, so coverage is comparable across the sweep rather
+than degrading at one end.
+
+A ``draw_signature.json`` pins (seed, probe sizes, total rows) and the run refuses to
+continue into a directory drawn with different ones -- resume would otherwise leave finished
+cells on the old probe and new cells on the new one, which no downstream metric could detect.
 
     python umap_hdbscan_sweep/hdbscan_scaling_sweep.py --embed-dir <stage1> \\
         --encoder-model <final_models/13_BEST_...pt> --output-dir <out> --embed-only
@@ -484,9 +491,10 @@ def parse_args() -> argparse.Namespace:
                         help="after the main loop, refit the largest successful size at this "
                              "min_samples to measure the memory delta. 0 disables.")
     parser.add_argument("--probe-sizes", default="50000,200000,500000")
-    parser.add_argument("--eval-probe-rows", type=int, default=1_000_000,
+    parser.add_argument("--eval-probe-rows", type=int, default=2_000_000,
                         help="fixed rows labelled by every size, excluded from all fit sets. "
-                             "This is what makes cross-size ARI computable later.")
+                             "This is what makes cross-size ARI computable later. Must not "
+                             "change within a sweep -- see the draw-signature guard in main.")
     parser.add_argument("--timing-probe-rows", type=int, default=500_000)
 
     parser.add_argument("--seed", type=int, default=42)
@@ -540,6 +548,37 @@ def main() -> int:
     else:
         log("WARNING: cuML not available -- this will run on the CPU backend and the "
             "timings will not describe the GPU path")
+
+    # Guard against the one change that corrupts a sweep silently. Resume skips completed
+    # cells, so re-running with a different probe size or seed leaves the finished cells
+    # holding labels for the OLD probe while new cells get the NEW one -- and a cross-size
+    # ARI computed over that mixture compares clusterings of different rows without any
+    # error surfacing. Fit sizes are deliberately NOT part of the signature: the
+    # permutation depends only on (total_rows, seed) and the probes are its first slices,
+    # so appending a larger fit size later leaves every existing draw untouched.
+    signature = {
+        "seed": int(args.seed),
+        "eval_probe_rows": int(args.eval_probe_rows),
+        "timing_probe_rows": int(args.timing_probe_rows),
+        "total_rows": int(total_rows),
+    }
+    signature_path = output_dir / "draw_signature.json"
+    if signature_path.exists():
+        previous = json.loads(signature_path.read_text())
+        if previous != signature:
+            changed = [k for k in signature if previous.get(k) != signature[k]]
+            raise SystemExit(
+                f"{output_dir} holds a sweep drawn with different settings.\n"
+                f"  changed: {', '.join(f'{k} {previous.get(k)} -> {signature[k]}' for k in changed)}\n"
+                f"\nCompleted cells would keep the old probe while new ones get the new one, "
+                f"and nothing downstream could tell them apart.\n"
+                f"To start over with the new settings (coords.npy is reused, it does not "
+                f"depend on the probes):\n"
+                f"  rm -rf {output_dir}/cells {output_dir}/labels {output_dir}/models \\\n"
+                f"         {output_dir}/draw_signature.json {output_dir}/scaling_results.json"
+            )
+    else:
+        signature_path.write_text(json.dumps(signature, indent=2))
 
     draws = draw_indices(total_rows, fit_sizes, args.eval_probe_rows,
                          args.timing_probe_rows, args.seed)
