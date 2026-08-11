@@ -239,7 +239,11 @@ def embed_coordinates(args) -> int:
     started = perf_counter()
     for start in range(0, total_rows, args.embed_batch_rows):
         stop = min(start + args.embed_batch_rows, total_rows)
-        chunk = np.ascontiguousarray(latent[start:stop], dtype=np.float32)
+        # np.array, not ascontiguousarray: the latter returns the input untouched when it
+        # is already contiguous float32, and a mmap_mode="r" slice is read-only, so
+        # torch.from_numpy downstream warns about a non-writable tensor. Harmless (nothing
+        # writes to it) but it masks the same warning if it ever means something.
+        chunk = np.array(latent[start:stop], dtype=np.float32)
         out[start:stop] = model.transform(chunk, batch_size=args.infer_batch_size)
         if (start // args.embed_batch_rows) % 5 == 0:
             done = stop / total_rows
@@ -304,7 +308,7 @@ def run_size(fit_rows: int, coordinates, draws: dict, args, output_dir: Path,
     log(f"[{label}] loading {fit_rows:,} coordinate rows (mcs={min_cluster_size}, "
         f"ms={min_samples}) ...")
     t0 = perf_counter()
-    fit_coordinates = np.ascontiguousarray(coordinates[fit_idx], dtype=np.float32)
+    fit_coordinates = np.array(coordinates[fit_idx], dtype=np.float32)
     record["coordinate_load_seconds"] = round(perf_counter() - t0, 2)
 
     config = core.HdbscanConfig(
@@ -353,56 +357,75 @@ def run_size(fit_rows: int, coordinates, draws: dict, args, output_dir: Path,
         f"{n_clusters:,} clusters, {noise_fraction:.1%} noise, "
         f"peak {memory['peak_used_gb']:.1f} GB)")
 
-    # One warm-up call: the first predict pays allocation and cuML kernel setup, and
-    # charging that to the smallest probe would fake a superlinear curve.
-    fitted.predict(np.ascontiguousarray(coordinates[timing_idx[:2000]], dtype=np.float32))
-
-    held_rows = TOTAL_COHORT_ROWS - fit_rows
-    predictions = []
-    for size in probe_sizes:
-        block = np.ascontiguousarray(coordinates[timing_idx[:size]], dtype=np.float32)
-        t0 = perf_counter()
-        labels, _ = fitted.predict(block)
-        seconds = perf_counter() - t0
-        per_million = seconds / (size / 1e6)
-        predictions.append({
-            "probe_rows": int(size),
-            "seconds": round(seconds, 3),
-            "seconds_per_million": round(per_million, 3),
-            "extrapolated_held_seconds": round(per_million * held_rows / 1e6, 1),
-            "extrapolated_held_minutes": round(per_million * held_rows / 1e6 / 60, 2),
-            "extrapolated_cohort_minutes": round(
-                per_million * TOTAL_COHORT_ROWS / 1e6 / 60, 2),
-            "noise_fraction": round(float((labels == -1).mean()), 5),
-        })
-        log(f"[{label}]   predict {size:>7,} rows in {seconds:6.2f}s = "
-            f"{per_million:7.2f} s/M -> {predictions[-1]['extrapolated_held_minutes']:6.1f} min "
-            f"for {held_rows:,} held rows")
-
-    rates = [entry["seconds_per_million"] for entry in predictions]
-    record["predict"] = predictions
-    record["predict_rate_spread"] = (
-        round(max(rates) / min(rates), 3) if min(rates) > 0 else None
-    )
-    record["held_rows"] = int(held_rows)
-
-    log(f"[{label}]   labelling the {len(eval_idx):,}-row eval probe ...")
-    t0 = perf_counter()
-    eval_labels, eval_probabilities = fitted.predict(
-        np.ascontiguousarray(coordinates[eval_idx], dtype=np.float32)
-    )
-    record["eval_probe_seconds"] = round(perf_counter() - t0, 2)
-    record["eval_probe_noise_fraction"] = round(float((eval_labels == -1).mean()), 5)
-    record["eval_probe_clusters_hit"] = int(np.unique(eval_labels[eval_labels >= 0]).size)
-
+    # Bank the fit output BEFORE predicting. The fit is the expensive artefact -- hours at
+    # the large end -- and predict allocates again on a card that has just held a peak. If
+    # an OOM lands there, saving afterwards would throw away a completed fit to a failure
+    # in a step that only measures it.
     labels_dir = output_dir / "labels"
     labels_dir.mkdir(parents=True, exist_ok=True)
     np.save(labels_dir / f"{label}_labels.npy", fitted.labels)
     np.save(labels_dir / f"{label}_probabilities.npy", fitted.probabilities)
     np.save(labels_dir / f"{label}_indices.npy", fit_idx)
-    np.save(labels_dir / f"{label}_evalprobe_labels.npy", eval_labels)
-    np.save(labels_dir / f"{label}_evalprobe_probabilities.npy", eval_probabilities)
     record["labels_saved"] = True
+
+    held_rows = TOTAL_COHORT_ROWS - fit_rows
+    record["held_rows"] = int(held_rows)
+    try:
+        # One warm-up call: the first predict pays allocation and cuML kernel setup, and
+        # charging that to the smallest probe would fake a superlinear curve.
+        fitted.predict(np.array(coordinates[timing_idx[:2000]], dtype=np.float32))
+
+        predictions = []
+        for size in probe_sizes:
+            block = np.array(coordinates[timing_idx[:size]], dtype=np.float32)
+            t0 = perf_counter()
+            labels, _ = fitted.predict(block)
+            seconds = perf_counter() - t0
+            per_million = seconds / (size / 1e6)
+            predictions.append({
+                "probe_rows": int(size),
+                "seconds": round(seconds, 3),
+                "seconds_per_million": round(per_million, 3),
+                "extrapolated_held_seconds": round(per_million * held_rows / 1e6, 1),
+                "extrapolated_held_minutes": round(per_million * held_rows / 1e6 / 60, 2),
+                "extrapolated_cohort_minutes": round(
+                    per_million * TOTAL_COHORT_ROWS / 1e6 / 60, 2),
+                "noise_fraction": round(float((labels == -1).mean()), 5),
+            })
+            log(f"[{label}]   predict {size:>7,} rows in {seconds:6.2f}s = "
+                f"{per_million:7.2f} s/M -> "
+                f"{predictions[-1]['extrapolated_held_minutes']:6.1f} min "
+                f"for {held_rows:,} held rows")
+
+        rates = [entry["seconds_per_million"] for entry in predictions]
+        record["predict"] = predictions
+        record["predict_rate_spread"] = (
+            round(max(rates) / min(rates), 3) if min(rates) > 0 else None
+        )
+
+        log(f"[{label}]   labelling the {len(eval_idx):,}-row eval probe ...")
+        t0 = perf_counter()
+        eval_labels, eval_probabilities = fitted.predict(
+            np.array(coordinates[eval_idx], dtype=np.float32)
+        )
+        record["eval_probe_seconds"] = round(perf_counter() - t0, 2)
+        record["eval_probe_noise_fraction"] = round(float((eval_labels == -1).mean()), 5)
+        record["eval_probe_clusters_hit"] = int(np.unique(eval_labels[eval_labels >= 0]).size)
+        np.save(labels_dir / f"{label}_evalprobe_labels.npy", eval_labels)
+        np.save(labels_dir / f"{label}_evalprobe_probabilities.npy", eval_probabilities)
+        record["eval_probe_saved"] = True
+    except Exception as exc:
+        # The fit succeeded and is on disk; only the measurement of it failed. Recorded as
+        # a distinct status so the summary can say "fit fine, predict OOMed at this size",
+        # which is itself the finding -- it is where full-cohort labelling stops being
+        # possible, and it is not the same wall as the fit running out of memory.
+        record["status"] = "predict_failed"
+        record["predict_error_type"] = type(exc).__name__
+        record["predict_error"] = str(exc)[:2000]
+        record.setdefault("predict", [])
+        record["eval_probe_saved"] = False
+        log(f"[{label}]   predict FAILED ({type(exc).__name__}: {str(exc)[:200]}); "
+            "fit labels are saved")
 
     if args.save_models:
         models_dir = output_dir / "models"
@@ -546,17 +569,24 @@ def main() -> int:
         records.append(record)
 
         if record["status"] != "ok" and not args.continue_after_failure:
-            log(f"stopping: fit{fit_rows} failed and sizes ascend, so nothing larger can "
-                "succeed. Pass --continue-after-failure to try them anyway.")
+            reason = ("the fit ran out of memory" if record["status"] == "failed"
+                      else "the fit succeeded but predict failed")
+            log(f"stopping: fit{fit_rows} -- {reason}, and sizes ascend so nothing larger "
+                "can do better. Pass --continue-after-failure to try them anyway.")
             stopped_early = True
             break
+
+    # "ok" means fit AND predict; "predict_failed" still has a usable fit on disk. The fit
+    # scaling curve and the min_samples probe care only about the fit, so they use the
+    # wider set; anything reading predict rates uses the narrower one.
+    fit_ok = [r for r in records if r["status"] in ("ok", "predict_failed")]
+    successful = [r for r in records if r["status"] == "ok"]
 
     # The memory question the main loop cannot answer: min_samples drives the kNN graph
     # size, and the 0-15 range under consideration tops out well above the 5 used here.
     extra = None
-    successful = [r for r in records if r["status"] == "ok"]
-    if args.extra_min_samples and successful:
-        largest = max(r["fit_rows"] for r in successful)
+    if args.extra_min_samples and fit_ok:
+        largest = max(r["fit_rows"] for r in fit_ok)
         log(f"extra probe: refitting {largest:,} rows at min_samples={args.extra_min_samples} "
             "to measure the memory delta")
         extra_path = cells_dir / f"fit{largest}_ms{args.extra_min_samples}.json"
@@ -597,17 +627,18 @@ def main() -> int:
     print("   fit rows    mcs   clusters   noise      fit s    s/M fit   peak GB   "
           "predict s/M")
     for record in records:
-        if record["status"] != "ok":
+        if record["status"] == "failed":
             print(f"{record['fit_rows']:>11,}  {record['min_cluster_size']:>5}   "
-                  f"FAILED: {record.get('error_type', '?')}")
+                  f"FIT FAILED: {record.get('error_type', '?')}")
             continue
-        rate = record["predict"][-1]["seconds_per_million"]
+        rate = (f"{record['predict'][-1]['seconds_per_million']:>11.2f}"
+                if record.get("predict") else f"{'predict OOM':>11}")
         print(f"{record['fit_rows']:>11,}  {record['min_cluster_size']:>5}  "
               f"{record['n_clusters']:>9,}  {record['fit_noise_fraction']:>6.1%}  "
               f"{record['fit_seconds']:>9.1f}  {record['seconds_per_million_fit_rows']:>8.1f}  "
-              f"{record['memory']['peak_used_gb']:>7.1f}  {rate:>11.2f}")
-    if extra and extra["status"] == "ok":
-        base = next((r for r in successful if r["fit_rows"] == extra["fit_rows"]), None)
+              f"{record['memory']['peak_used_gb']:>7.1f}  {rate}")
+    if extra and extra["status"] in ("ok", "predict_failed"):
+        base = next((r for r in fit_ok if r["fit_rows"] == extra["fit_rows"]), None)
         extra_peak = extra["memory"]["peak_used_gb"]
         if base is not None:
             base_peak = base["memory"]["peak_used_gb"]
@@ -625,13 +656,17 @@ def main() -> int:
               f"of reach at {extra['fit_rows']:,} rows, so cap the later sweep below it")
     print("-------------------------------------------------------------------------")
 
-    if len(successful) >= 2:
-        first, last = successful[0], successful[-1]
+    if len(fit_ok) >= 2:
+        first, last = fit_ok[0], fit_ok[-1]
         size_ratio = last["fit_rows"] / first["fit_rows"]
         time_ratio = last["fit_seconds"] / max(first["fit_seconds"], 1e-9)
         exponent = np.log(time_ratio) / np.log(size_ratio) if size_ratio > 1 else float("nan")
         print(f"\nfit cost scales as N^{exponent:.2f} between {first['fit_rows']:,} and "
               f"{last['fit_rows']:,} rows")
+
+    if len(successful) >= 2:
+        first, last = successful[0], successful[-1]
+        size_ratio = last["fit_rows"] / first["fit_rows"]
         rate_first = first["predict"][-1]["seconds_per_million"]
         rate_last = last["predict"][-1]["seconds_per_million"]
         print(f"predict rate {rate_first:.1f} -> {rate_last:.1f} s/M over the same range "

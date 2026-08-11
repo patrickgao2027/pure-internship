@@ -29,6 +29,11 @@ FIT_SIZES="${FIT_SIZES:-500000,1000000,5000000,10000000,15000000,25000000,500000
 MIN_SAMPLES="${MIN_SAMPLES:-5}"
 EXTRA_MIN_SAMPLES="${EXTRA_MIN_SAMPLES:-15}"
 PROBE_SIZES="${PROBE_SIZES:-50000,200000,500000}"
+# The eval probe must be the SAME rows for every fit size -- that is what makes cross-size
+# ARI computable. Changing it part way through a sweep silently mixes two probes across the
+# resumed and new cells, so if you change it, delete cells/ and labels/ and start over.
+EVAL_PROBE_ROWS="${EVAL_PROBE_ROWS:-1000000}"
+TIMING_PROBE_ROWS="${TIMING_PROBE_ROWS:-500000}"
 
 if command -v micromamba &>/dev/null; then
     eval "$(micromamba shell hook --shell bash)"
@@ -78,6 +83,8 @@ python "$SCRIPT" \
     --min-samples "$MIN_SAMPLES" \
     --extra-min-samples "$EXTRA_MIN_SAMPLES" \
     --probe-sizes "$PROBE_SIZES" \
+    --eval-probe-rows "$EVAL_PROBE_ROWS" \
+    --timing-probe-rows "$TIMING_PROBE_ROWS" \
     --gpu-budget-gb "$GPU_TOTAL_GB" \
     $MODEL_FLAG \
     2>&1 | tee "$OUTPUT_DIR/scaling.log"
