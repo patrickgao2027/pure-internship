@@ -90,7 +90,6 @@ class PredictionTables:
     tree_root: int
     min_samples: int
     n_fit: int
-    max_lambda_source: str = "unknown"
 
 
 def build_tables(clusterer, n_fit: int, min_samples: int | None = None) -> PredictionTables:
@@ -132,68 +131,27 @@ def build_tables(clusterer, n_fit: int, min_samples: int | None = None) -> Predi
     parent_of[children[is_cluster_row]] = parents[is_cluster_row]
     lambda_of[children[is_cluster_row]] = lambdas[is_cluster_row]
 
-    # Each cluster's own max lambda = the largest lambda_val among rows having it as parent.
-    # Coincident points give lambda = 1/0 = inf, and a single such pair would otherwise set a
-    # whole cluster's max lambda to inf, making prob = lambda/inf = 0 for every point in it.
-    # Clamp to the largest finite lambda, which is the scale the probabilities are meant to be
-    # normalised against.
-    finite_only = np.where(np.isfinite(lambdas), lambdas, 0.0)
+    # Each cluster's own max lambda = the largest lambda_val among rows having it as parent,
+    # which is exactly what PredictionData.__init__ computes. Non-finite lambdas are skipped:
+    # lambda = 1/distance and cuML computes it in float32, so coincident points -- unavoidable
+    # in a 25M-row 2-D embedding -- overflow, and one of them would set a whole cluster's scale
+    # to inf and drive every probability in it to zero.
     own_max_lambda = np.zeros(max_cluster, dtype=np.float64)
-    np.maximum.at(own_max_lambda, parents, finite_only)
+    np.maximum.at(own_max_lambda, parents, np.where(np.isfinite(lambdas), lambdas, 0.0))
 
     cluster_label = _cluster_labels(clusterer, raw_tree, max_cluster, parent_of,
                                     is_cluster_row, parents, children)
 
     # A cluster below a selected one inherits the SELECTED ancestor's max lambda, not its own
-    # (PredictionData.__init__: `self.max_lambdas[sub_cluster] = self.max_lambdas[cluster]`).
-    # Probabilities are normalised by the selected cluster's scale, so using each cluster's
-    # own maximum silently inflates the probability of points landing on a descendant -- it
-    # leaves labels correct, which is what makes it easy to miss.
+    # (PredictionData.__init__: `self.max_lambdas[sub_cluster] = self.max_lambdas[cluster]`);
+    # walking to the topmost ancestor carrying the same label is that mapping without the
+    # recursion.
     #
-    # Prefer the model's own dict: it is literally the table the reference indexes, so taking
-    # it removes a reconstruction step from the trusted path. Rebuild it only when the model
-    # has no prediction_data_ (walking to the topmost ancestor carrying the same label gives
-    # the selected cluster, which is the same mapping the reference builds recursively).
-    max_lambda = np.zeros(max_cluster, dtype=np.float64)
-    prediction_data = getattr(clusterer, "prediction_data_", None)
-    model_max_lambdas = getattr(prediction_data, "max_lambdas", None) if prediction_data else None
-    max_lambda_source = "model.prediction_data_.max_lambdas"
-    if model_max_lambdas:
-        for cluster, value in model_max_lambdas.items():
-            max_lambda[int(cluster)] = float(value)
-    else:
-        max_lambda_source = "reconstructed (selected-ancestor walk)"
-        max_lambda = own_max_lambda[_selected_ancestor(cluster_label, parent_of)]
-
-    # Trusting the model's dict needs the values to be usable, and "usable" is not "> 0".
-    # A joblib-loaded cuML model regenerates prediction data on first access and fills
-    # max_lambdas with FLT_MAX (3.403e38) -- a sentinel, not a maximum. That sails through a
-    # `> 0` check and then makes prob = lambda/3.4e38 ~ 0 for every point, while leaving
-    # labels untouched, so nothing surfaces it unless probabilities are compared.
-    #
-    # The principled bound: a cluster's max lambda is a lambda_val drawn from the condensed
-    # tree, so it cannot exceed the largest lambda_val in that tree. Anything above it is a
-    # sentinel or corruption, whatever its magnitude.
-    # The bound must come from the FINITE lambdas only. lambda = 1/distance, so any pair of
-    # coincident points puts an `inf` in the tree -- and in a 25M-row 2-D UMAP embedding
-    # duplicate coordinates are a certainty, not an edge case. Taking a raw `lambdas.max()`
-    # there yields inf, `values <= inf` is vacuously true, and the sentinel check silently
-    # passes on exactly the model it exists to catch (observed on the 25M cuML model: every
-    # mapped cluster FLT_MAX, source still reported as the model dict).
-    finite_lambdas = lambdas[np.isfinite(lambdas)]
-    tree_max_lambda = float(finite_lambdas.max()) if finite_lambdas.size else np.inf
-    mapped = cluster_label >= 0
-    if mapped.any():
-        values = max_lambda[mapped]
-        usable = (np.isfinite(values) & (values > 0)
-                  & (values <= tree_max_lambda * (1.0 + 1e-6)))
-        if usable.mean() < 0.5:
-            rebuilt = own_max_lambda[_selected_ancestor(cluster_label, parent_of)]
-            max_lambda_source = (
-                f"reconstructed (model dict unusable: only {usable.mean():.1%} of mapped "
-                f"clusters had a finite value in (0, {tree_max_lambda:.4g}]; "
-                f"median was {np.median(values):.4g})")
-            max_lambda = rebuilt
+    # Derived from the tree every time rather than read from prediction_data_.max_lambdas.
+    # That dict is a cache of this same derivation, and a joblib-loaded cuML model regenerates
+    # it full of FLT_MAX, which leaves labels correct but makes prob = lambda/3.4e38 ~ 0
+    # everywhere. Deriving is what PredictionData itself does, so this IS the reference path.
+    max_lambda = own_max_lambda[_selected_ancestor(cluster_label, parent_of)]
 
     return PredictionTables(
         core_distances=core_distances.astype(np.float64),
@@ -207,7 +165,6 @@ def build_tables(clusterer, n_fit: int, min_samples: int | None = None) -> Predi
         else int(parents.min()),
         min_samples=min_samples,
         n_fit=n_fit,
-        max_lambda_source=max_lambda_source,
     )
 
 
@@ -509,7 +466,6 @@ def do_diagnose(tables: PredictionTables, fit_coords, query_coords, args) -> Non
     """
     mapped = tables.cluster_label >= 0
     print("\n-- prediction tables ------------------------------------------")
-    print(f"  max_lambda source     : {tables.max_lambda_source}")
     print(f"  mapped tree clusters  : {int(mapped.sum()):,}")
     print(f"  distinct labels       : {int(np.unique(tables.cluster_label[mapped]).size):,}")
     if mapped.any():

@@ -118,140 +118,52 @@ def test_cluster_labels_recovered_without_prediction_data():
     assert disagreement == 0.0, f"fallback label map differs on {disagreement:.2%} of points"
 
 
-def test_falls_back_when_model_max_lambdas_is_unusable():
-    """A max_lambdas dict that exists but does not cover the mapped clusters leaves
-    max_lambda at 0, and `prob = where(max_lambda > 0, ..., 1.0)` then reports every labelled
-    point as fully confident. Labels stay correct, so it is invisible without checking
-    probabilities -- exactly the failure seen against the 25M cuML model. build_tables must
-    notice the coverage gap and reconstruct instead."""
-    fit = make_blobs(5000, seed=10)
-    query = make_blobs(1500, seed=11)
+def test_derived_max_lambdas_match_the_models_own_table():
+    """max_lambda is derived from the condensed tree rather than read from
+    `prediction_data_.max_lambdas`, because a joblib-loaded cuML model regenerates that dict
+    full of FLT_MAX (3.403e38) and every probability then comes out as lambda/3.4e38 ~ 0 while
+    the labels stay correct. Deriving is what `PredictionData.__init__` does in the first
+    place, so on a healthy CPU model the two must agree exactly -- that is what makes deriving
+    a faithful substitution rather than a workaround."""
+    fit = make_blobs(5000, seed=16)
 
     clusterer = hdbscan.HDBSCAN(min_cluster_size=50, min_samples=5,
                                 cluster_selection_method="eom", prediction_data=True)
     clusterer.fit(fit)
-    reference_labels, reference_probabilities = hdbscan.approximate_predict(clusterer, query)
 
-    crippled = _CrippledMaxLambdas(clusterer)
-    tables = build_tables(crippled, n_fit=fit.shape[0])
-    assert "reconstructed" in tables.max_lambda_source, tables.max_lambda_source
+    tables = build_tables(clusterer, n_fit=fit.shape[0])
+    reference = clusterer.prediction_data_.max_lambdas
+    assert reference, "test needs a populated max_lambdas dict"
 
-    labels, probabilities = predict(tables, fit, query, backend="sklearn")
-    np.testing.assert_array_equal(labels, reference_labels)
-    np.testing.assert_allclose(probabilities, reference_probabilities, atol=1e-6)
+    for cluster, expected in reference.items():
+        np.testing.assert_allclose(tables.max_lambda[int(cluster)], float(expected), rtol=1e-9)
 
 
-class _CrippledMaxLambdas:
-    """Real prediction data except max_lambdas, which covers almost nothing."""
+def test_repeated_runs_give_identical_results():
+    """Duplicate runs must return the same labels, or the cohort labelling is not reproducible.
 
-    def __init__(self, clusterer):
-        self.condensed_tree_ = clusterer.condensed_tree_
-        self.labels_ = clusterer.labels_
-        self.min_samples = clusterer.min_samples
-        self.min_cluster_size = clusterer.min_cluster_size
-
-        real = clusterer.prediction_data_
-        one_key = next(iter(real.max_lambdas))
-        self.prediction_data_ = type("_PD", (), {
-            "core_distances": real.core_distances,
-            "cluster_map": real.cluster_map,
-            "max_lambdas": {one_key: real.max_lambdas[one_key]},
-        })()
-
-
-def test_falls_back_when_model_max_lambdas_are_sentinels():
-    """The real miletus failure: a joblib-loaded cuML model regenerates prediction data with
-    max_lambdas full of FLT_MAX (3.403e38). Every value is > 0, so a coverage check passes,
-    and prob = lambda/3.4e38 ~ 0 everywhere while labels stay correct. The bound that catches
-    it is that a max lambda is a lambda_val from the condensed tree and cannot exceed the
-    largest one in it."""
-    fit = make_blobs(5000, seed=12)
-    query = make_blobs(1500, seed=13)
-
-    clusterer = hdbscan.HDBSCAN(min_cluster_size=50, min_samples=5,
-                                cluster_selection_method="eom", prediction_data=True)
-    clusterer.fit(fit)
-    reference_labels, reference_probabilities = hdbscan.approximate_predict(clusterer, query)
-
-    poisoned = _SentinelMaxLambdas(clusterer, sentinel=np.finfo(np.float32).max)
-    tables = build_tables(poisoned, n_fit=fit.shape[0])
-    assert "reconstructed" in tables.max_lambda_source, tables.max_lambda_source
-
-    labels, probabilities = predict(tables, fit, query, backend="sklearn")
-    np.testing.assert_array_equal(labels, reference_labels)
-    np.testing.assert_allclose(probabilities, reference_probabilities, atol=1e-6)
-    assert probabilities.mean() > 0.01, "sentinel max_lambda would crush probabilities to ~0"
-
-
-def test_sentinel_rejected_even_when_the_tree_holds_an_infinite_lambda():
-    """The regression from the 25M cuML model.
-
-    The sentinel guard bounds max_lambda by the largest lambda_val in the condensed tree, on
-    the reasoning that a max lambda IS one of those values. But lambda = 1/distance, and cuML
-    computes it in float32, so coincident points -- a certainty in a 25M-row 2-D embedding --
-    put `inf` in the tree. The bound becomes `values <= inf`, nothing fails it, and a model
-    whose every mapped cluster was FLT_MAX sailed through: labels correct, probability mean
-    0.0076 against cuML's 0.9160. CPU hdbscan clips those lambdas to finite, which is why no
-    naturally-fitted model reproduces it -- the inf has to be injected to get the cuML shape.
-
-    A non-finite lambda also poisons the reconstruction path, since own_max_lambda takes a
-    per-cluster maximum: one inf sets a whole cluster's scale to inf and every probability in
-    it to lambda/inf = 0. Both paths have to survive it, so this asserts on probabilities and
-    not merely on which source was chosen.
+    This pins the numpy half (steps 2-5 plus a deterministic KDTree). The GPU half -- whether
+    cuML's RBC picks the same representatives twice, since it seeds them randomly and exposes
+    no random_state -- cannot be tested here and is what `--determinism-check` measures on
+    miletus.
     """
-    fit = make_blobs(5000, seed=14)
-    query = make_blobs(1500, seed=15)
+    import hashlib
+
+    fit = make_blobs(5000, seed=17)
+    query = make_blobs(2000, seed=18)
 
     clusterer = hdbscan.HDBSCAN(min_cluster_size=50, min_samples=5,
                                 cluster_selection_method="eom", prediction_data=True)
     clusterer.fit(fit)
-    reference_labels, reference_probabilities = hdbscan.approximate_predict(clusterer, query)
 
-    poisoned = _SentinelMaxLambdas(clusterer, sentinel=np.finfo(np.float32).max,
-                                   inject_infinite_lambda=True)
-    assert not np.isfinite(poisoned.condensed_tree_._raw_tree["lambda_val"]).all()
+    hashes = set()
+    for _ in range(3):
+        tables = build_tables(clusterer, n_fit=fit.shape[0])
+        labels, probabilities = predict(tables, fit, query, backend="sklearn")
+        hashes.add((hashlib.md5(labels.tobytes()).hexdigest(),
+                    hashlib.md5(probabilities.tobytes()).hexdigest()))
 
-    tables = build_tables(poisoned, n_fit=fit.shape[0])
-    assert "reconstructed" in tables.max_lambda_source, (
-        f"FLT_MAX slipped through when the tree held an inf: {tables.max_lambda_source}")
-    assert np.isfinite(tables.max_lambda).all(), "an inf lambda leaked into the max_lambda table"
-
-    labels, probabilities = predict(tables, fit, query, backend="sklearn")
-    assert probabilities.mean() > 0.5, (
-        f"probabilities crushed to {probabilities.mean():.4f} -- the miletus symptom")
-
-    # The injected inf sits on one leaf row, so the labelling is unchanged for everything that
-    # does not descend through it.
-    agreement = float((labels == reference_labels).mean())
-    assert agreement > 0.99, f"only {agreement:.4%} of labels survived the injected inf"
-
-
-class _SentinelMaxLambdas:
-    """Real prediction data except max_lambdas, which is every-key-is-FLT_MAX.
-
-    With `inject_infinite_lambda` the condensed tree also gets one non-finite lambda_val, the
-    way cuML's float32 `1/0` does on coincident points. CPU hdbscan never emits one, so it has
-    to be planted to reproduce the model that actually defeated the guard.
-    """
-
-    def __init__(self, clusterer, sentinel, inject_infinite_lambda=False):
-        self.condensed_tree_ = clusterer.condensed_tree_
-        self.labels_ = clusterer.labels_
-        self.min_samples = clusterer.min_samples
-        self.min_cluster_size = clusterer.min_cluster_size
-
-        if inject_infinite_lambda:
-            raw = clusterer.condensed_tree_._raw_tree.copy()
-            leaf = np.nonzero(raw["child_size"] == 1)[0][0]
-            raw["lambda_val"][leaf] = np.inf
-            self.condensed_tree_ = type("_CT", (), {"_raw_tree": raw})()
-
-        real = clusterer.prediction_data_
-        self.prediction_data_ = type("_PD", (), {
-            "core_distances": real.core_distances,
-            "cluster_map": real.cluster_map,
-            "max_lambdas": {k: float(sentinel) for k in real.max_lambdas},
-        })()
+    assert len(hashes) == 1, f"{len(hashes)} distinct results across 3 identical runs"
 
 
 class _StrippedModel:
