@@ -31,6 +31,41 @@ What is and is not computed
 * **CDbw** -- deliberately absent. No maintained, validated Python implementation exists, it
   needs multiple representatives per cluster (O(n^2)-ish), and it would land as a third
   subsample-based density score next to DBCV without adding an independent question.
+* **Dunn / generalised Dunn** -- deliberately absent, see the note below.
+
+References
+----------
+* HDBSCAN cluster stability, and the excess-of-mass selection EOM maximises:
+  Campello, Moulavi & Sander (2013), "Density-Based Clustering Based on Hierarchical Density
+  Estimates", PAKDD, LNCS 7819, 160-172. Extended: Campello, Moulavi, Zimek & Sander (2015),
+  ACM TKDD 10(1):5.
+* ``cluster_persistence_`` / ``relative_validity_``: McInnes, Healy & Astels (2017),
+  "hdbscan: Hierarchical density based clustering", JOSS 2(11):205. The library documents
+  ``relative_validity_`` as "a fast approximation of the DBCV score" computed from the
+  mutual-reachability MST, and warns it "might not be an objective measure of the goodness of
+  clustering. It may only be used to compare results across different choices of
+  hyper-parameters".
+* DBCV: Moulavi, Jaskowiak, Campello, Zimek & Sander (2014), "Density-Based Clustering
+  Validation", SDM, 839-847, doi:10.1137/1.9781611973440.96.
+* Connectivity: Handl & Knowles (2005), "Computational cluster validation in post-genomic
+  data analysis", Bioinformatics 21(15):3201-3212.
+* CDbw: Halkidi & Vazirgiannis (2008), Pattern Recognition Letters 29(6):773-786.
+
+On Dunn
+-------
+There is no canonical method called the "robust Dunn index". What exists is the family of
+**generalised Dunn indices** in Bezdek & Pal (1998), "Some new indexes of cluster validity",
+IEEE Trans. SMC-B 28(3):301-315, which identifies two deficiencies making the original Dunn
+index (Dunn 1974, J. Cybernetics 4(1):95-104) "overly sensitive to noisy clusters" and
+proposes generalisations "not as brittle to outliers".
+
+Those generalisations are not adopted here, for a reason stated in that same paper: its
+finding that minimum interset distance is the least reliable basis for a validity index holds
+"when the clusters are expected to form volumetric clouds". HDBSCAN clusters are arbitrarily
+shaped by construction, which is precisely the case DBCV was introduced to handle -- Moulavi
+et al. open by noting that indices designed for globular clusters "may fail" on density-based
+ones. A Dunn variant would also compress 1,000+ clusters into one scalar driven by the single
+closest pair out of ~660,000, which cannot say WHICH clusters are poor.
 """
 from __future__ import annotations
 
@@ -70,7 +105,17 @@ def probability_stats(probabilities: np.ndarray, labels: np.ndarray) -> dict:
 
 
 def persistence_stats(clusterer) -> dict:
-    """HDBSCAN's per-cluster stability, if the backend exposes it."""
+    """HDBSCAN's per-cluster stability, if the backend exposes it.
+
+    Stability is the excess of mass of a cluster in the condensed hierarchy -- the integral
+    of its membership over the density scales it survives (Campello, Moulavi & Sander 2013).
+    ``cluster_persistence_`` normalises it to 0-1: 1.0 is "persists over all distance
+    scales", 0.0 is "perfectly ephemeral".
+
+    EOM selection chooses the set of clusters MAXIMISING total stability, so under
+    ``cluster_selection_method='eom'`` the sum is the objective the fit already optimised and
+    is not independent evidence about the fit. Under ``leaf`` it is.
+    """
     values = getattr(clusterer, "cluster_persistence_", None)
     if values is None:
         return {}

@@ -50,6 +50,26 @@ BUILD_INDEX_ONLY=1 bash umap_hdbscan_sweep/tmux_param_sweep.sh
 needs multiple representatives per cluster (O(n²)-ish), and it would land as a third
 subsample-based density score beside DBCV without asking an independent question.
 
+**Dunn is deliberately absent, and there is no "robust Dunn index".** The real method is the
+family of *generalised Dunn indices* — Bezdek & Pal (1998) identify two deficiencies that
+make the original "overly sensitive to noisy clusters" and propose variants "not as brittle
+to outliers". Not adopted here because that paper's own framing is about clusters "expected
+to form volumetric clouds", and HDBSCAN clusters are arbitrarily shaped by construction —
+exactly the case DBCV was introduced for. A Dunn variant would also compress 1,000+ clusters
+into one scalar driven by the single closest pair out of ~660,000, which cannot say *which*
+clusters are poor.
+
+### Sources
+
+| | |
+|---|---|
+| HDBSCAN stability, EOM selection | Campello, Moulavi & Sander (2013), *Density-Based Clustering Based on Hierarchical Density Estimates*, PAKDD, LNCS 7819:160–172; extended in ACM TKDD 10(1):5 (2015) |
+| `cluster_persistence_`, `relative_validity_` | McInnes, Healy & Astels (2017), *hdbscan: Hierarchical density based clustering*, JOSS 2(11):205 |
+| DBCV | Moulavi, Jaskowiak, Campello, Zimek & Sander (2014), *Density-Based Clustering Validation*, SDM:839–847, doi:10.1137/1.9781611973440.96 |
+| Connectivity | Handl & Knowles (2005), *Computational cluster validation in post-genomic data analysis*, Bioinformatics 21(15):3201–3212 |
+| Generalised Dunn | Bezdek & Pal (1998), *Some new indexes of cluster validity*, IEEE Trans. SMC-B 28(3):301–315; original Dunn (1974), J. Cybernetics 4(1):95–104 |
+| CDbw | Halkidi & Vazirgiannis (2008), Pattern Recognition Letters 29(6):773–786 |
+
 **The caveat above all of these:** DBCV, connectivity, persistence and the excluded
 silhouette family all measure geometry *in the embedding*. The 2026-08-04 UMAP cells separate
 cleanly by every density criterion and are still 87 % single-trinucleotide-context — they
