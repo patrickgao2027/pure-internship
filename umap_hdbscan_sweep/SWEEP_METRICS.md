@@ -54,7 +54,14 @@ is wrong.
 | `cosine_median`, `_mean`, `_p10`, `_p90` | Distribution shape. It is bimodal, so the median alone misleads. |
 | `cosine_mutation_weighted_mean` | Cohort-level quality. Stops a long tail of tiny well-fit clusters from flattering a cell. |
 | `signatures_used`, `signatures` | How much of the reference the clustering actually exercises. |
-| `n_uv_subtypes_separated` | Do SBS7a/b/c/d dominate **different** clusters? Evidence the clustering resolves UV biology instead of smearing it. |
+| `n_sbs7_subtypes_separated` | Do SBS7A/B/C/D dominate **different** clusters? Evidence the clustering resolves UV biology instead of smearing it. |
+| `sbs38_present`, `sbs38_dominates_a_cluster` | SBS38 is the fifth member of the `uv_only` database and not an SBS7 subtype, so it is reported separately — the plan asks whether it *still appears*. |
+
+**Signature names carry two spellings.** COSMIC ships `SBS7a`; `write_uv_only_signature_database`
+renames to `SBS7A`. So `--signature-set full` yields lowercase Activities columns and
+`uv_only` yields uppercase ones. All matching is done upper-cased, because matching one
+spelling reports **zero** UV signatures under the other configuration — as a number, not an
+error, so it reads as a clustering result rather than a string mismatch.
 
 **Why mutation share and not cluster count.** Finding 1 measured, across `mcs` 100 → 2500:
 

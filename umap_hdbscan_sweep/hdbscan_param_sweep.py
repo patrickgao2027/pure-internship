@@ -84,9 +84,15 @@ MUTATION_FLOOR = 3_000
 MUTATION_CEILING = 300_000
 COSINE_THRESHOLDS = (0.7, 0.8)
 
-# SBS7A-D are the UV signatures; whether they land in DISTINCT clusters is the biological
-# read-out the plan asks for (Phase 3), not a generic quality score.
-UV_SIGNATURES = ("SBS7a", "SBS7b", "SBS7c", "SBS7d")
+# The uv_only reference database is these five (run_variant_cluster_pipeline.SBS96_SIGNATURES).
+# Two spellings exist and both reach this code: COSMIC ships lowercase suffixes (SBS7a), and
+# write_uv_only_signature_database RENAMES them to uppercase (SBS7A) when it builds the
+# restricted database. So --signature-set full yields lowercase column names and uv_only
+# yields uppercase ones. Everything below compares upper-cased, because matching one spelling
+# literally reports zero UV signatures under the other configuration and looks like a
+# clustering result rather than a string mismatch.
+SBS7_SUBTYPES = ("SBS7A", "SBS7B", "SBS7C", "SBS7D")
+UV_SIGNATURES = SBS7_SUBTYPES + ("SBS38",)
 
 
 def log(message: str) -> None:
@@ -395,17 +401,26 @@ def sigprofiler_metrics(output_dir: Path, cluster_columns: list[str],
         used = matrix.sum(axis=0) > 0
         metrics["signatures_used"] = int(used.sum())
         metrics["signatures"] = [c for c, u in zip(signature_columns, used) if u]
-        # Do the four UV subtypes end up dominating DIFFERENT clusters? The plan asks this
-        # directly -- SBS7a-d separating is evidence the clustering resolves UV biology
-        # rather than smearing it across one blob.
-        dominant = {}
+
+        # The plan (Phase 3) asks two separate questions, so they are reported separately:
+        # do all four SBS7 subtypes separate into DISTINCT clusters, and does SBS38 still
+        # appear. Lumping SBS38 into a single "UV signatures" count would let a cell score 4
+        # with SBS38 and only three SBS7 subtypes, which is a different -- worse -- result.
+        dominant: dict[str, str] = {}
         for row_index, sample in enumerate(activities[activities.columns[0]].to_list()):
             row = matrix[row_index]
             if row.sum() > 0:
                 dominant[str(sample)] = signature_columns[int(row.argmax())]
-        metrics["uv_subtypes_dominant_somewhere"] = sorted(
-            {s for s in dominant.values() if s in UV_SIGNATURES})
-        metrics["n_uv_subtypes_separated"] = len(metrics["uv_subtypes_dominant_somewhere"])
+
+        dominant_upper = {name.upper() for name in dominant.values()}
+        used_upper = {c.upper() for c, u in zip(signature_columns, used) if u}
+        metrics["sbs7_subtypes_dominant"] = sorted(dominant_upper & set(SBS7_SUBTYPES))
+        metrics["n_sbs7_subtypes_separated"] = len(metrics["sbs7_subtypes_dominant"])
+        # "Appears" means it drew nonzero activity anywhere; dominating a cluster is the
+        # stronger claim, and the two come apart when SBS38 is present but always minor.
+        metrics["sbs38_present"] = "SBS38" in used_upper
+        metrics["sbs38_dominates_a_cluster"] = "SBS38" in dominant_upper
+        metrics["uv_signatures_dominant"] = sorted(dominant_upper & set(UV_SIGNATURES))
     return metrics
 
 
@@ -647,7 +662,8 @@ def aggregate(output_dir: Path) -> pl.DataFrame:
             "mut_share_cos07": round(signatures.get("mutation_share_above_07", 0) * 100, 2),
             "mut_share_cos08": round(signatures.get("mutation_share_above_08", 0) * 100, 2),
             "n_signatures": signatures.get("signatures_used", 0),
-            "uv_subtypes": signatures.get("n_uv_subtypes_separated", 0),
+            "sbs7_separated": signatures.get("n_sbs7_subtypes_separated", 0),
+            "sbs38": signatures.get("sbs38_present", False),
             "fit_s": payload.get("fit_seconds", 0),
             "label_s": payload.get("label_seconds", 0),
         })

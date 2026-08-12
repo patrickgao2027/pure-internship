@@ -20,12 +20,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from hdbscan_param_sweep import (  # noqa: E402
     MUTATION_CEILING,
     MUTATION_FLOOR,
+    SBS7_SUBTYPES,
+    UV_SIGNATURES,
     Cell,
     build_grid,
     cluster_size_stats,
     projected_fit_seconds,
     sbs96_counts,
     sbs96_expr,
+    sigprofiler_metrics,
 )
 
 
@@ -179,3 +182,82 @@ def test_projected_fit_seconds_reproduces_the_measured_points():
 def test_thresholds_match_the_plan():
     assert (MUTATION_FLOOR, MUTATION_CEILING) == (3_000, 300_000)
     assert Cell(1, 2, 3).cluster_selection_method == "eom"
+
+
+def test_uv_signature_set_matches_the_uv_only_database():
+    """The uv_only reference is SBS7A-D **plus SBS38**
+    (run_variant_cluster_pipeline.SBS96_SIGNATURES). Dropping SBS38 loses the "does SBS38
+    still appear" question the plan asks by name, and it is the one UV signature that is not
+    an SBS7 subtype, so it cannot be recovered from the subtype count."""
+    assert set(UV_SIGNATURES) == {"SBS7A", "SBS7B", "SBS7C", "SBS7D", "SBS38"}
+    assert set(SBS7_SUBTYPES) == {"SBS7A", "SBS7B", "SBS7C", "SBS7D"}
+    assert "SBS38" not in SBS7_SUBTYPES
+
+
+@pytest.mark.parametrize("spelling", ["upper", "lower"])
+def test_signature_metrics_survive_both_column_spellings(tmp_path, spelling):
+    """COSMIC ships `SBS7a`; write_uv_only_signature_database renames to `SBS7A`. So the
+    Activities columns are lowercase under --signature-set full and uppercase under uv_only.
+
+    Matching one spelling literally reports zero UV signatures under the other -- and it
+    reports it as a number, not an error, so it reads as a clustering result. That is the
+    failure this pins.
+    """
+    names = (["SBS7A", "SBS7B", "SBS7C", "SBS7D", "SBS38"] if spelling == "upper"
+             else ["SBS7a", "SBS7b", "SBS7c", "SBS7d", "SBS38"])
+    stats_dir = tmp_path / "Assignment_Solution" / "Solution_Stats"
+    activities_dir = tmp_path / "Assignment_Solution" / "Activities"
+    stats_dir.mkdir(parents=True)
+    activities_dir.mkdir(parents=True)
+
+    clusters = [f"cluster_{i}" for i in range(5)]
+    pl.DataFrame({"Samples": clusters,
+                  "Cosine Similarity": [0.95, 0.85, 0.75, 0.65, 0.20]}
+                 ).write_csv(stats_dir / "Assignment_Solution_Samples_Stats.txt",
+                             separator="\t")
+    # Each cluster is dominated by a different signature: all four SBS7 subtypes separate
+    # and SBS38 dominates the fifth.
+    activity = {"Samples": clusters}
+    for position, name in enumerate(names):
+        activity[name] = [1000 if row == position else 1 for row in range(5)]
+    pl.DataFrame(activity).write_csv(
+        activities_dir / "Assignment_Solution_Activities.txt", separator="\t")
+
+    mutations = {name: value for name, value in
+                 zip(clusters, [100_000.0, 50_000.0, 20_000.0, 10_000.0, 5_000.0])}
+    metrics = sigprofiler_metrics(tmp_path, clusters, mutations)
+
+    assert metrics["n_sbs7_subtypes_separated"] == 4, metrics
+    assert metrics["sbs38_present"] is True
+    assert metrics["sbs38_dominates_a_cluster"] is True
+    assert metrics["signatures_used"] == 5
+
+    # Mutation share above 0.7 must be size-weighted, not a cluster fraction: three of five
+    # clusters clear it, but they hold 170k of 185k mutations.
+    assert metrics["clusters_above_07"] == 3
+    np.testing.assert_allclose(metrics["mutation_share_above_07"], 170_000 / 185_000)
+
+
+def test_sbs38_absence_is_reported_without_hiding_sbs7_separation(tmp_path):
+    """SBS38 missing and one SBS7 subtype missing are different findings; a single combined
+    UV count would score both as 4 and conflate them."""
+    stats_dir = tmp_path / "Assignment_Solution" / "Solution_Stats"
+    activities_dir = tmp_path / "Assignment_Solution" / "Activities"
+    stats_dir.mkdir(parents=True)
+    activities_dir.mkdir(parents=True)
+
+    clusters = [f"cluster_{i}" for i in range(4)]
+    pl.DataFrame({"Samples": clusters, "Cosine Similarity": [0.9, 0.9, 0.9, 0.9]}
+                 ).write_csv(stats_dir / "Assignment_Solution_Samples_Stats.txt",
+                             separator="\t")
+    activity = {"Samples": clusters}
+    for position, name in enumerate(["SBS7A", "SBS7B", "SBS7C", "SBS7D"]):
+        activity[name] = [1000 if row == position else 0 for row in range(4)]
+    activity["SBS38"] = [0, 0, 0, 0]
+    pl.DataFrame(activity).write_csv(
+        activities_dir / "Assignment_Solution_Activities.txt", separator="\t")
+
+    metrics = sigprofiler_metrics(tmp_path, clusters, dict.fromkeys(clusters, 1000.0))
+    assert metrics["n_sbs7_subtypes_separated"] == 4
+    assert metrics["sbs38_present"] is False
+    assert metrics["sbs38_dominates_a_cluster"] is False
