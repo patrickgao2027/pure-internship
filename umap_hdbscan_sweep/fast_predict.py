@@ -160,17 +160,27 @@ def build_tables(clusterer, n_fit: int, min_samples: int | None = None) -> Predi
         max_lambda_source = "reconstructed (selected-ancestor walk)"
         max_lambda = own_max_lambda[_selected_ancestor(cluster_label, parent_of)]
 
-    # A dict that exists but does not cover the mapped clusters is worse than no dict at all:
-    # max_lambda stays 0, `prob = where(max_lambda > 0, ..., 1.0)` returns 1.0, and every
-    # labelled point comes back fully confident. Labels are unaffected, so this is invisible
-    # unless probabilities are checked -- fall back rather than emit confident nonsense.
+    # Trusting the model's dict needs the values to be usable, and "usable" is not "> 0".
+    # A joblib-loaded cuML model regenerates prediction data on first access and fills
+    # max_lambdas with FLT_MAX (3.403e38) -- a sentinel, not a maximum. That sails through a
+    # `> 0` check and then makes prob = lambda/3.4e38 ~ 0 for every point, while leaving
+    # labels untouched, so nothing surfaces it unless probabilities are compared.
+    #
+    # The principled bound: a cluster's max lambda is a lambda_val drawn from the condensed
+    # tree, so it cannot exceed the largest lambda_val in that tree. Anything above it is a
+    # sentinel or corruption, whatever its magnitude.
+    tree_max_lambda = float(lambdas.max()) if lambdas.size else np.inf
     mapped = cluster_label >= 0
-    if mapped.any() and (max_lambda[mapped] > 0).mean() < 0.5:
-        covered = float((max_lambda[mapped] > 0).mean())
-        rebuilt = own_max_lambda[_selected_ancestor(cluster_label, parent_of)]
-        if (rebuilt[mapped] > 0).mean() > covered:
-            max_lambda_source = (f"reconstructed (model dict covered only {covered:.1%} "
-                                 f"of mapped clusters)")
+    if mapped.any():
+        values = max_lambda[mapped]
+        usable = (np.isfinite(values) & (values > 0)
+                  & (values <= tree_max_lambda * (1.0 + 1e-6)))
+        if usable.mean() < 0.5:
+            rebuilt = own_max_lambda[_selected_ancestor(cluster_label, parent_of)]
+            max_lambda_source = (
+                f"reconstructed (model dict unusable: only {usable.mean():.1%} of mapped "
+                f"clusters had a finite value in (0, {tree_max_lambda:.4g}]; "
+                f"median was {np.median(values):.4g})")
             max_lambda = rebuilt
 
     return PredictionTables(

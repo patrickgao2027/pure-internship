@@ -159,6 +159,47 @@ class _CrippledMaxLambdas:
         })()
 
 
+def test_falls_back_when_model_max_lambdas_are_sentinels():
+    """The real miletus failure: a joblib-loaded cuML model regenerates prediction data with
+    max_lambdas full of FLT_MAX (3.403e38). Every value is > 0, so a coverage check passes,
+    and prob = lambda/3.4e38 ~ 0 everywhere while labels stay correct. The bound that catches
+    it is that a max lambda is a lambda_val from the condensed tree and cannot exceed the
+    largest one in it."""
+    fit = make_blobs(5000, seed=12)
+    query = make_blobs(1500, seed=13)
+
+    clusterer = hdbscan.HDBSCAN(min_cluster_size=50, min_samples=5,
+                                cluster_selection_method="eom", prediction_data=True)
+    clusterer.fit(fit)
+    reference_labels, reference_probabilities = hdbscan.approximate_predict(clusterer, query)
+
+    poisoned = _SentinelMaxLambdas(clusterer, sentinel=np.finfo(np.float32).max)
+    tables = build_tables(poisoned, n_fit=fit.shape[0])
+    assert "reconstructed" in tables.max_lambda_source, tables.max_lambda_source
+
+    labels, probabilities = predict(tables, fit, query, backend="sklearn")
+    np.testing.assert_array_equal(labels, reference_labels)
+    np.testing.assert_allclose(probabilities, reference_probabilities, atol=1e-6)
+    assert probabilities.mean() > 0.01, "sentinel max_lambda would crush probabilities to ~0"
+
+
+class _SentinelMaxLambdas:
+    """Real prediction data except max_lambdas, which is every-key-is-FLT_MAX."""
+
+    def __init__(self, clusterer, sentinel):
+        self.condensed_tree_ = clusterer.condensed_tree_
+        self.labels_ = clusterer.labels_
+        self.min_samples = clusterer.min_samples
+        self.min_cluster_size = clusterer.min_cluster_size
+
+        real = clusterer.prediction_data_
+        self.prediction_data_ = type("_PD", (), {
+            "core_distances": real.core_distances,
+            "cluster_map": real.cluster_map,
+            "max_lambdas": {k: float(sentinel) for k in real.max_lambdas},
+        })()
+
+
 class _StrippedModel:
     """A fitted model with `prediction_data_` hidden, standing in for the cuML shape."""
 
