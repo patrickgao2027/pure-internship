@@ -90,6 +90,7 @@ class PredictionTables:
     tree_root: int
     min_samples: int
     n_fit: int
+    max_lambda_source: str = "unknown"
 
 
 def build_tables(clusterer, n_fit: int, min_samples: int | None = None) -> PredictionTables:
@@ -151,11 +152,26 @@ def build_tables(clusterer, n_fit: int, min_samples: int | None = None) -> Predi
     max_lambda = np.zeros(max_cluster, dtype=np.float64)
     prediction_data = getattr(clusterer, "prediction_data_", None)
     model_max_lambdas = getattr(prediction_data, "max_lambdas", None) if prediction_data else None
+    max_lambda_source = "model.prediction_data_.max_lambdas"
     if model_max_lambdas:
         for cluster, value in model_max_lambdas.items():
             max_lambda[int(cluster)] = float(value)
     else:
+        max_lambda_source = "reconstructed (selected-ancestor walk)"
         max_lambda = own_max_lambda[_selected_ancestor(cluster_label, parent_of)]
+
+    # A dict that exists but does not cover the mapped clusters is worse than no dict at all:
+    # max_lambda stays 0, `prob = where(max_lambda > 0, ..., 1.0)` returns 1.0, and every
+    # labelled point comes back fully confident. Labels are unaffected, so this is invisible
+    # unless probabilities are checked -- fall back rather than emit confident nonsense.
+    mapped = cluster_label >= 0
+    if mapped.any() and (max_lambda[mapped] > 0).mean() < 0.5:
+        covered = float((max_lambda[mapped] > 0).mean())
+        rebuilt = own_max_lambda[_selected_ancestor(cluster_label, parent_of)]
+        if (rebuilt[mapped] > 0).mean() > covered:
+            max_lambda_source = (f"reconstructed (model dict covered only {covered:.1%} "
+                                 f"of mapped clusters)")
+            max_lambda = rebuilt
 
     return PredictionTables(
         core_distances=core_distances.astype(np.float64),
@@ -169,6 +185,7 @@ def build_tables(clusterer, n_fit: int, min_samples: int | None = None) -> Predi
         else int(parents.min()),
         min_samples=min_samples,
         n_fit=n_fit,
+        max_lambda_source=max_lambda_source,
     )
 
 
@@ -459,6 +476,96 @@ def do_inspect(model) -> None:
               "(they are just the min_samples-th NN distance inside the fit set).")
 
 
+def do_diagnose(tables: PredictionTables, fit_coords, query_coords, args) -> None:
+    """Everything worth knowing, from one model load.
+
+    Splits the search space in one shot. 'brute' runs the SAME steps 2-5 over different
+    neighbours, so if rbc and brute agree with each other but both differ from cuML, the
+    neighbour search is exonerated and the divergence is in steps 2-5 (or in cuML's own
+    algorithm differing from the CPU reference this reproduces). If they differ from each
+    other, the index is at fault.
+    """
+    mapped = tables.cluster_label >= 0
+    print("\n-- prediction tables ------------------------------------------")
+    print(f"  max_lambda source     : {tables.max_lambda_source}")
+    print(f"  mapped tree clusters  : {int(mapped.sum()):,}")
+    print(f"  distinct labels       : {int(np.unique(tables.cluster_label[mapped]).size):,}")
+    if mapped.any():
+        values = tables.max_lambda[mapped]
+        print(f"  max_lambda > 0        : {float((values > 0).mean()) * 100:.2f}% of mapped")
+        positive = values[values > 0]
+        if positive.size:
+            print(f"  max_lambda percentiles: "
+                  + ", ".join(f"p{p}={np.percentile(positive, p):.4g}"
+                              for p in (1, 25, 50, 75, 99)))
+    print(f"  core_distances        : min={tables.core_distances.min():.4g} "
+          f"median={np.median(tables.core_distances):.4g} "
+          f"max={tables.core_distances.max():.4g} "
+          f"zeros={int((tables.core_distances == 0).sum()):,}")
+    print(f"  tree_root             : {tables.tree_root:,}  (n_fit={tables.n_fit:,})")
+
+    results = {}
+    for backend in ("rbc", "brute"):
+        try:
+            started = perf_counter()
+            index = build_index(fit_coords, 2 * tables.min_samples, backend)
+            build_seconds = perf_counter() - started
+            started = perf_counter()
+            labels, probabilities = predict(tables, fit_coords, query_coords,
+                                            backend=backend, batch_rows=args.batch_rows,
+                                            index=index)
+            elapsed = perf_counter() - started
+            rate = elapsed / (query_coords.shape[0] / 1e6)
+            results[backend] = (labels, probabilities)
+            print(f"\n  {backend:6} index {build_seconds:6.1f}s  label {elapsed:7.1f}s  "
+                  f"{rate:7.2f} s/M -> {rate * 157.5 / 60:.1f} min for 157.5M")
+        except Exception as exc:  # noqa: BLE001 - a failing backend is itself the finding
+            print(f"\n  {backend:6} FAILED: {type(exc).__name__}: {str(exc)[:300]}")
+
+    if len(results) == 2:
+        rbc_labels, rbc_probabilities = results["rbc"]
+        brute_labels, brute_probabilities = results["brute"]
+        same = rbc_labels == brute_labels
+        print(f"\n  rbc vs brute labels   : {same.mean() * 100:.4f}% identical "
+              f"({int((~same).sum()):,} differ)")
+        print(f"  rbc vs brute max|dp|  : "
+              f"{np.abs(rbc_probabilities - brute_probabilities).max():.3e}")
+        if same.all():
+            print("  -> the index is EXONERATED: RBC returns neighbours giving identical "
+                  "output to brute force.")
+            print("     Any gap to cuML is in steps 2-5, or cuML's algorithm differs from "
+                  "the CPU reference.")
+        else:
+            print("  -> RBC and brute disagree: the neighbour search is the suspect.")
+
+    if not args.reference:
+        return
+    reference = np.load(args.reference)
+    reference_probabilities = (np.load(args.reference_probabilities)
+                               if args.reference_probabilities else None)
+    for backend, (labels, probabilities) in results.items():
+        agree = labels == reference
+        print(f"\n-- {backend} vs cuML reference ----------------------------------")
+        print(f"  exact label agreement : {agree.mean() * 100:.4f}%")
+        mine_noise, ref_noise = labels < 0, reference < 0
+        print(f"  mine clustered/ref -1 : {float((~mine_noise & ref_noise).mean()) * 100:.4f}%")
+        print(f"  mine -1/ref clustered : {float((mine_noise & ~ref_noise).mean()) * 100:.4f}%")
+        both = ~mine_noise & ~ref_noise
+        if both.any():
+            disagree_both = float((labels[both] != reference[both]).mean())
+            print(f"  both clustered, differ: {disagree_both * 100:.4f}% "
+                  "(cluster identity, not the noise gate)")
+        if reference_probabilities is not None:
+            delta = np.abs(probabilities - reference_probabilities)
+            print(f"  max|dp| {delta.max():.3e}   mean|dp| {delta.mean():.3e}")
+            print(f"  mine  prob mean {probabilities.mean():.4f}  "
+                  f"frac==1.0 {float((probabilities == 1.0).mean()):.4f}  "
+                  f"frac==0.0 {float((probabilities == 0.0).mean()):.4f}")
+            print(f"  cuML  prob mean {reference_probabilities.mean():.4f}  "
+                  f"frac==1.0 {float((reference_probabilities == 1.0).mean()):.4f}  "
+                  f"frac==0.0 {float((reference_probabilities == 0.0).mean()):.4f}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -467,6 +574,10 @@ def main() -> None:
     mode.add_argument("--validate", action="store_true",
                       help="relabel the eval probe and compare against saved reference labels")
     mode.add_argument("--apply", action="store_true", help="label rows and write them out")
+    mode.add_argument("--diagnose", action="store_true",
+                      help="one model load, every question: table health, rbc-vs-brute "
+                           "(isolates the neighbour search from steps 2-5), and a breakdown "
+                           "of how the labels differ from the reference")
 
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--coords", type=Path, help="coords.npy for the whole cohort")
@@ -521,6 +632,10 @@ def main() -> None:
         query_idx = np.nonzero(mask)[0]
     query_coords = np.array(coords[query_idx], dtype=np.float32)
     log(f"labelling {query_coords.shape[0]:,} rows via backend={args.backend}")
+
+    if args.diagnose:
+        do_diagnose(tables, fit_coords, query_coords, args)
+        return
 
     started = perf_counter()
     index = build_index(fit_coords, 2 * tables.min_samples, args.backend)

@@ -118,6 +118,47 @@ def test_cluster_labels_recovered_without_prediction_data():
     assert disagreement == 0.0, f"fallback label map differs on {disagreement:.2%} of points"
 
 
+def test_falls_back_when_model_max_lambdas_is_unusable():
+    """A max_lambdas dict that exists but does not cover the mapped clusters leaves
+    max_lambda at 0, and `prob = where(max_lambda > 0, ..., 1.0)` then reports every labelled
+    point as fully confident. Labels stay correct, so it is invisible without checking
+    probabilities -- exactly the failure seen against the 25M cuML model. build_tables must
+    notice the coverage gap and reconstruct instead."""
+    fit = make_blobs(5000, seed=10)
+    query = make_blobs(1500, seed=11)
+
+    clusterer = hdbscan.HDBSCAN(min_cluster_size=50, min_samples=5,
+                                cluster_selection_method="eom", prediction_data=True)
+    clusterer.fit(fit)
+    reference_labels, reference_probabilities = hdbscan.approximate_predict(clusterer, query)
+
+    crippled = _CrippledMaxLambdas(clusterer)
+    tables = build_tables(crippled, n_fit=fit.shape[0])
+    assert "reconstructed" in tables.max_lambda_source, tables.max_lambda_source
+
+    labels, probabilities = predict(tables, fit, query, backend="sklearn")
+    np.testing.assert_array_equal(labels, reference_labels)
+    np.testing.assert_allclose(probabilities, reference_probabilities, atol=1e-6)
+
+
+class _CrippledMaxLambdas:
+    """Real prediction data except max_lambdas, which covers almost nothing."""
+
+    def __init__(self, clusterer):
+        self.condensed_tree_ = clusterer.condensed_tree_
+        self.labels_ = clusterer.labels_
+        self.min_samples = clusterer.min_samples
+        self.min_cluster_size = clusterer.min_cluster_size
+
+        real = clusterer.prediction_data_
+        one_key = next(iter(real.max_lambdas))
+        self.prediction_data_ = type("_PD", (), {
+            "core_distances": real.core_distances,
+            "cluster_map": real.cluster_map,
+            "max_lambdas": {one_key: real.max_lambdas[one_key]},
+        })()
+
+
 class _StrippedModel:
     """A fitted model with `prediction_data_` hidden, standing in for the cuML shape."""
 
