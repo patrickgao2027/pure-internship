@@ -130,6 +130,56 @@ STAGE=2 bash umap_hdbscan_sweep/run_sweep.sh
 
 Wait for the trainer to finish if you want `FIT_ROWS=all`.
 
+## Resource requirements for the parametric UMAP pipeline
+
+These are **measured** numbers from the chosen model (#13: 25M fit rows, nn=15, md=0.1, umap
+mode) on the miletus RTX PRO 5000 Blackwell (48 GB).
+
+### GPU VRAM
+
+| Phase | What dominates | Peak VRAM |
+|---|---|---|
+| cuML UMAP fit (25M rows, nn=15) | kNN graph + fuzzy edges | **~10 GB** |
+| Encoder training (torch, umap loss) | fit latent + edge subset (150M edges) | **~4 GB** |
+| Full cohort embed (157.5M rows) | 2M-row batches, encoder only | **<1 GB** |
+
+Breakdown of the cuML fit peak:
+
+| Structure | Calculation | Size |
+|---|---|---|
+| Fit latent | 25M × 16 × 4 B | 1.6 GB |
+| kNN indices | 25M × 15 × 4 B | 1.5 GB |
+| kNN distances | 25M × 15 × 4 B | 1.5 GB |
+| Fuzzy graph (COO) | ~375M edges × 12 B | 4.5 GB |
+| Embedding output | 25M × 2 × 4 B | 0.2 GB |
+
+At other fit sizes, VRAM scales as `fit_rows × n_neighbors × 8 B` for the kNN graph alone.
+For nn=15: 5M rows ≈ 3 GB, 10M ≈ 6 GB, 25M ≈ 10 GB.
+
+**Minimum GPU to reproduce model #13: ~12 GB** (10 GB fit + overhead). A 16 GB card runs
+it with margin; anything smaller requires dropping to a 10–15M fit, which degrades rep knn
+by roughly 0.06–0.07.
+
+### CPU RAM
+
+- `latent.npy` is opened with `mmap_mode="r"` — the OS pages in only what is accessed.
+  Only the 25M fit slice (1.6 GB) and the 500k probe (32 MB) land in physical RAM during
+  training.
+- Full cohort embed streams 2M rows at a time; RAM footprint stays at **~130 MB** throughout.
+
+### Encoder file size
+
+- One saved `.pt` file: **~417 KB** (MLP with hidden=(256,256,128), 2D output).
+- All 8 final models together: ~3.3 MB.
+
+### Wall-clock times (miletus Blackwell)
+
+| Step | Time |
+|---|---|
+| cuML UMAP fit, 25M rows | 2797 s (~46 min) |
+| Encoder training, 30k steps | 41 s |
+| Full cohort embed, 157.5M rows | 22 s |
+
 ## Cost
 
 Stage 2's dominant cost is 32 UMAP fits (one per `n_neighbors × min_dist × n_components`);
