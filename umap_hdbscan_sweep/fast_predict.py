@@ -576,6 +576,50 @@ def do_diagnose(tables: PredictionTables, fit_coords, query_coords, args) -> Non
                   f"frac==0.0 {float((reference_probabilities == 0.0).mean()):.4f}")
 
 
+def do_determinism_check(tables: PredictionTables, fit_coords: np.ndarray,
+                         query_coords: np.ndarray, n_runs: int,
+                         batch_rows: int) -> None:
+    """Build the RBC index and label the probe N times; compare hashes across runs.
+
+    RBC selects its representatives at random; cuML exposes no random_state for
+    NearestNeighbors. This measures whether the implementation happens to be
+    deterministic in practice (fixed seed internally, or deterministic GPU kernel).
+
+    The hash printed at the end can be compared across separate invocations:
+        python fast_predict.py --determinism-check 3 ... | tail -1
+    Run it twice in different terminals; if the hashes match, the index is
+    reproducible across processes too.
+    """
+    import hashlib
+
+    k = 2 * tables.min_samples
+    hashes = []
+    log(f"determinism check: {n_runs} runs over {query_coords.shape[0]:,} query rows")
+    for i in range(n_runs):
+        t0 = perf_counter()
+        index = build_index(fit_coords, k, "rbc")
+        build_s = perf_counter() - t0
+        t0 = perf_counter()
+        labels, _ = predict(tables, fit_coords, query_coords,
+                            backend="rbc", batch_rows=batch_rows, index=index)
+        label_s = perf_counter() - t0
+        h = hashlib.md5(labels.tobytes()).hexdigest()
+        hashes.append(h)
+        clustered_pct = float((labels >= 0).mean()) * 100
+        log(f"  run {i + 1}/{n_runs}: hash={h}  build={build_s:.1f}s  "
+            f"label={label_s:.1f}s  clustered={clustered_pct:.2f}%")
+
+    distinct = len(set(hashes))
+    if distinct == 1:
+        log(f"DETERMINISTIC within this process: all {n_runs} runs produced hash={hashes[0]}")
+        log(f"PROCESS hash={hashes[0]}")
+    else:
+        log(f"NON-DETERMINISTIC: {distinct} distinct hashes across {n_runs} runs")
+        for i, h in enumerate(hashes):
+            log(f"  run {i + 1}: {h}")
+        log("PROCESS hash=UNSTABLE")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -584,6 +628,11 @@ def main() -> None:
     mode.add_argument("--validate", action="store_true",
                       help="relabel the eval probe and compare against saved reference labels")
     mode.add_argument("--apply", action="store_true", help="label rows and write them out")
+    mode.add_argument("--determinism-check", type=int, metavar="N", default=0,
+                      help="build the index and label the probe N times from scratch, then "
+                           "compare. Prints a hash of the labels so runs in SEPARATE "
+                           "processes can be compared too -- RBC picks its representatives "
+                           "at random and cuML exposes no seed for it")
     mode.add_argument("--diagnose", action="store_true",
                       help="one model load, every question: table health, rbc-vs-brute "
                            "(isolates the neighbour search from steps 2-5), and a breakdown "
@@ -645,6 +694,12 @@ def main() -> None:
 
     if args.diagnose:
         do_diagnose(tables, fit_coords, query_coords, args)
+        return
+
+    if args.determinism_check:
+        do_determinism_check(tables, fit_coords, query_coords,
+                             n_runs=args.determinism_check,
+                             batch_rows=args.batch_rows)
         return
 
     started = perf_counter()
