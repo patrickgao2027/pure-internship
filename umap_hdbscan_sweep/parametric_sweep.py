@@ -398,6 +398,21 @@ def run_cell(
     curve_high = probe_latent[curve_positions]
     curve_reference = cuml_probe[curve_positions]
 
+    # Family D scores the encoder on rows it trained on, so the tier arrives as row *ids*
+    # rather than positions. Fit sets are sorted, so a fixed position range would instead
+    # pick the lowest-row-index rows of every set -- the whole 2 M set at size 2 M but only
+    # the earliest fifth of a 10 M one, an ever-narrower slice of the cohort as the fit
+    # grows. That would confound the size axis family D exists to measure. Resolving ids
+    # against this fit set scores the identical physical rows at every size instead.
+    in_ids = tiers["in_sample"]
+    located = np.searchsorted(fit_index, in_ids)
+    inside = located < len(fit_index)
+    inside[inside] &= fit_index[located[inside]] == in_ids[inside]
+    in_positions = located[inside]
+    if in_positions.size != in_ids.size:
+        log(f"    note: {in_ids.size - in_positions.size:,}/{in_ids.size:,} in-sample rows "
+            f"are not in this fit set -- family D scores the remainder")
+
     mode_results: dict[str, dict] = {}
     for mode in args.modes:
         torch.manual_seed(config.seed)
@@ -479,8 +494,7 @@ def run_cell(
             net_probe[tiers["cluster"]], cuml_labels, args, use_gpu)
 
         # ── family D: the same comparison on rows the encoder trained on ──────
-        in_positions = tiers["in_sample"]
-        if in_positions.size and in_positions.max() < len(fit_index):
+        if in_positions.size:
             in_latent = np.ascontiguousarray(latent[fit_index[in_positions]])
             net_in = model.transform(in_latent, batch_size=args.infer_batch_size)
             cuml_in = fit_embedding[in_positions]
@@ -883,19 +897,18 @@ def main() -> int:
         overlap_positions, size=min(args.knn_rows, len(overlap_positions)), replace=False))
     curve_positions = np.sort(subset_rng.choice(
         knn_positions, size=min(args.curve_rows, len(knn_positions)), replace=False))
-    in_sample_positions = np.sort(
-        np.random.default_rng(args.seed + 2).choice(
-            min(sizes), size=min(args.in_sample_rows, min(sizes)), replace=False))
+    # in_sample is deliberately absent here: it indexes the *fit* rows, not the probe, so it
+    # is drawn per replicate once the fit sets exist. See in_sample_ids_by_replicate below.
     tiers = {
         "cluster": cluster_positions,
         "overlap": overlap_positions,
         "knn": knn_positions,
         "curve": curve_positions,
-        "in_sample": in_sample_positions,
     }
+    in_sample_rows = min(args.in_sample_rows, min(sizes))
     log(f"tiers: probe {len(probe_index):,} / cluster {len(cluster_positions):,} / "
         f"overlap {len(overlap_positions):,} / knn {len(knn_positions):,} / "
-        f"curve {len(curve_positions):,} / in-sample {len(in_sample_positions):,}")
+        f"curve {len(curve_positions):,} / in-sample {in_sample_rows:,}")
 
     cells: dict[str, list[dict]] = {}
     reference_by_cell: dict[str, list[dict]] = {}
@@ -945,7 +958,12 @@ def main() -> int:
                 "batch_size": args.batch_size,
                 "max_edges": args.max_edges,
             },
-            "tiers": {name: int(len(value)) for name, value in tiers.items()},
+            "tiers": {**{name: int(len(value)) for name, value in tiers.items()},
+                      "in_sample": int(in_sample_rows)},
+            # in_sample rows are resolved per fit set by row id, so the same physical rows
+            # are scored at every size. Runs before this flag was added used fixed positions
+            # into the sorted fit set, which narrowed the slice as the fit grew.
+            "in_sample_selection": "row_ids",
             "probe_rows": int(len(probe_index)),
             "metric_k": args.metric_k,
             "metric_k_max": args.metric_k_max,
@@ -984,6 +1002,18 @@ def main() -> int:
         for replicate in range(args.seeds)
     ]
 
+    # Family D's in-sample rows, as row ids drawn from each replicate's *smallest* fit set.
+    # Sizes are nested within a replicate, so those ids are present at every size and
+    # family D therefore scores the same physical rows as the fit grows -- which is what
+    # makes its size axis a measurement of generalisation rather than of which slice of the
+    # cohort happened to be sampled. Per replicate because the fit sets are redrawn.
+    in_sample_rng = np.random.default_rng(args.seed + 2)
+    in_sample_ids_by_replicate = [
+        np.sort(in_sample_rng.choice(
+            fit_sets_by_replicate[replicate][min(sizes)], size=in_sample_rows, replace=False))
+        for replicate in range(args.seeds)
+    ]
+
     # Replicate is the INNERMOST loop, deliberately. Family E -- agreement between
     # independently trained encoders -- is the only thing here that cannot be computed from
     # a single replicate, and it is the number the sweep exists to produce. With replicate
@@ -1001,8 +1031,10 @@ def main() -> int:
                 seeded = core.UmapConfig(
                     **{**config.as_dict(), "seed": args.seed + replicate})
                 log(f"  replicate {replicate + 1}/{args.seeds} ...")
-                cell = run_cell(size, seeded, latent, fit_index, probe_latent,
-                                tiers, args, use_gpu, device)
+                cell = run_cell(
+                    size, seeded, latent, fit_index, probe_latent,
+                    {**tiers, "in_sample": in_sample_ids_by_replicate[replicate]},
+                    args, use_gpu, device)
 
                 fit_seconds_by_size[size].append(cell["timing"].get("umap_fit_seconds", 0.0))
                 transform_seconds_all.append(cell["timing"].get("probe_transform_seconds", 0.0))

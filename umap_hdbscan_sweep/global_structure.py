@@ -14,8 +14,9 @@ without re-running the sweep: it reloads the encoders the sweep saved under
 ``--encoder-dir``, embeds one fixed set of probe rows through each, and correlates.
 
 **It never refits.** ``apply_parametric_full.py`` falls back to refitting UMAP when an
-encoder is missing, which at 25 M rows is hours. Here a missing encoder is reported and
-skipped, because the point of this script is that it is cheap.
+encoder is missing, which the sweep's own ``fit_timing_by_size`` puts at 2797 s for the
+25 M fit. Here a missing encoder is reported and skipped, because the point of this
+script is that it is cheap.
 
 Every cell is scored on the *same* probe rows and, because
 ``distance_correlations`` draws its pairs from a fixed seed, the *same* pairs. So
