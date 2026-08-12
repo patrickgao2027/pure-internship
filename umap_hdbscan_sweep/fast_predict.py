@@ -374,7 +374,13 @@ def load_model(path: Path):
 
 
 def do_inspect(model) -> None:
-    """Report which internals this build exposes. Run before anything long."""
+    """Report which internals this build exposes. Run before anything long.
+
+    Note: accessing `prediction_data_` on a cuML model can itself be slow the first time --
+    if prediction data did not survive a joblib round-trip (its C++/GPU state is not always
+    picklable across cuML versions), the attribute access silently regenerates it from
+    scratch over the whole fit set. That is real GPU work, not a hang; watch `nvidia-smi`.
+    """
     print(f"model type: {type(model)}")
     interesting = ["labels_", "probabilities_", "condensed_tree_", "prediction_data_",
                    "core_distances_", "core_distances", "min_samples", "min_cluster_size",
@@ -396,10 +402,27 @@ def do_inspect(model) -> None:
     if prediction_data is not None:
         print(f"  prediction_data_ attributes: "
               f"{[a for a in dir(prediction_data) if not a.startswith('__')][:12]}")
+        # This is the actual first place _core_distances() looks -- if it is here, the
+        # top-level core_distances_/core_distances MISSING above does not matter.
+        nested_core = getattr(prediction_data, "core_distances", None)
+        nested_map = getattr(prediction_data, "cluster_map", None)
+        if nested_core is not None:
+            shape = getattr(nested_core, "shape", None)
+            print(f"  prediction_data_.core_distances   present"
+                  + (f" shape={shape}" if shape is not None else ""))
+        if nested_map is not None:
+            print(f"  prediction_data_.cluster_map      present ({len(nested_map)} entries)")
 
-    print("\nWhat this script needs: condensed_tree_ (raw), core distances, labels_.")
-    print("If core distances are MISSING, pass --recompute-core-distances "
-          "(they are just the min_samples-th NN distance inside the fit set).")
+    have_core = (prediction_data is not None
+                and getattr(prediction_data, "core_distances", None) is not None) \
+        or getattr(model, "core_distances_", None) is not None \
+        or getattr(model, "core_distances", None) is not None
+    have_tree = tree is not None
+    print(f"\nWhat this script needs: condensed_tree_ (raw) [{'ok' if have_tree else 'MISSING'}], "
+          f"core distances [{'ok' if have_core else 'MISSING'}], labels_.")
+    if not have_core:
+        print("Core distances missing everywhere -- pass --recompute-core-distances "
+              "(they are just the min_samples-th NN distance inside the fit set).")
 
 
 def main() -> None:
