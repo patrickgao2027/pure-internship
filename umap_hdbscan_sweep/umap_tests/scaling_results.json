@@ -1,0 +1,435 @@
+{
+  "run_timestamp": "2026-08-12T08:54:10.083294+00:00",
+  "coords_path": "/home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests/hdbscan_scaling/coords.npy",
+  "total_rows": 157501580,
+  "seed": 42,
+  "hdbscan": {
+    "cluster_selection_method": "eom",
+    "min_samples": 5,
+    "metric": "euclidean",
+    "cluster_selection_epsilon": 0.0,
+    "min_cluster_size_policy": "max(50, round(fit_rows * 0.0001))"
+  },
+  "eval_probe_rows": 2000000,
+  "timing_probe_rows": 500000,
+  "probe_sizes": [
+    50000,
+    200000,
+    500000
+  ],
+  "gpu_budget": {
+    "enabled": true,
+    "budget_gb": 40.0,
+    "device_total_gb": 47.27,
+    "torch_fraction": 0.0846,
+    "torch_budget_gb": 4.0,
+    "rmm_pool_gb": 36.0,
+    "rmm_note": null,
+    "notes": [],
+    "stage": "sweep",
+    "rmm_share": 0.9,
+    "device_free_gb_before": 46.85
+  },
+  "cells": [
+    {
+      "fit_rows": 500000,
+      "min_cluster_size": 50,
+      "min_samples": 5,
+      "cluster_selection_method": "eom",
+      "label": "fit500000",
+      "coordinate_load_seconds": 0.04,
+      "status": "ok",
+      "backend": "cuml",
+      "fit_seconds": 7.2,
+      "seconds_per_million_fit_rows": 14.46,
+      "n_clusters": 1338,
+      "fit_noise_fraction": 0.17566,
+      "dbcv": null,
+      "memory": {
+        "backend": "pynvml",
+        "baseline_used_gb": 9.94,
+        "peak_used_gb": 9.944,
+        "delta_gb": 0.004,
+        "samples": 15
+      },
+      "labels_saved": true,
+      "held_rows": 157001580,
+      "predict": [
+        {
+          "probe_rows": 50000,
+          "seconds": 0.103,
+          "seconds_per_million": 2.062,
+          "extrapolated_held_seconds": 323.7,
+          "extrapolated_held_minutes": 5.39,
+          "extrapolated_cohort_minutes": 5.41,
+          "noise_fraction": 0.32754
+        },
+        {
+          "probe_rows": 200000,
+          "seconds": 0.406,
+          "seconds_per_million": 2.032,
+          "extrapolated_held_seconds": 319.0,
+          "extrapolated_held_minutes": 5.32,
+          "extrapolated_cohort_minutes": 5.33,
+          "noise_fraction": 0.32974
+        },
+        {
+          "probe_rows": 500000,
+          "seconds": 1.009,
+          "seconds_per_million": 2.018,
+          "extrapolated_held_seconds": 316.9,
+          "extrapolated_held_minutes": 5.28,
+          "extrapolated_cohort_minutes": 5.3,
+          "noise_fraction": 0.32841
+        }
+      ],
+      "predict_rate_spread": 1.022,
+      "eval_probe_seconds": 4.13,
+      "eval_probe_noise_fraction": 0.32622,
+      "eval_probe_clusters_hit": 1337,
+      "eval_probe_saved": true,
+      "model_path": "/home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests/hdbscan_scaling/models/hdbscan_fit500000.joblib",
+      "model_size_mb": 56.2
+    },
+    {
+      "fit_rows": 1000000,
+      "min_cluster_size": 100,
+      "min_samples": 5,
+      "cluster_selection_method": "eom",
+      "label": "fit1000000",
+      "coordinate_load_seconds": 0.04,
+      "status": "ok",
+      "backend": "cuml",
+      "fit_seconds": 23.6,
+      "seconds_per_million_fit_rows": 23.58,
+      "n_clusters": 1246,
+      "fit_noise_fraction": 0.14708,
+      "dbcv": null,
+      "memory": {
+        "backend": "pynvml",
+        "baseline_used_gb": 9.944,
+        "peak_used_gb": 9.944,
+        "delta_gb": 0.0,
+        "samples": 48
+      },
+      "labels_saved": true,
+      "held_rows": 156501580,
+      "predict": [
+        {
+          "probe_rows": 50000,
+          "seconds": 0.202,
+          "seconds_per_million": 4.048,
+          "extrapolated_held_seconds": 633.6,
+          "extrapolated_held_minutes": 10.56,
+          "extrapolated_cohort_minutes": 10.63,
+          "noise_fraction": 0.29502
+        },
+        {
+          "probe_rows": 200000,
+          "seconds": 0.803,
+          "seconds_per_million": 4.013,
+          "extrapolated_held_seconds": 628.1,
+          "extrapolated_held_minutes": 10.47,
+          "extrapolated_cohort_minutes": 10.53,
+          "noise_fraction": 0.29799
+        },
+        {
+          "probe_rows": 500000,
+          "seconds": 1.999,
+          "seconds_per_million": 3.997,
+          "extrapolated_held_seconds": 625.6,
+          "extrapolated_held_minutes": 10.43,
+          "extrapolated_cohort_minutes": 10.49,
+          "noise_fraction": 0.2981
+        }
+      ],
+      "predict_rate_spread": 1.013,
+      "eval_probe_seconds": 8.1,
+      "eval_probe_noise_fraction": 0.29644,
+      "eval_probe_clusters_hit": 1246,
+      "eval_probe_saved": true,
+      "model_path": "/home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests/hdbscan_scaling/models/hdbscan_fit1000000.joblib",
+      "model_size_mb": 112.2
+    },
+    {
+      "fit_rows": 5000000,
+      "min_cluster_size": 500,
+      "min_samples": 5,
+      "cluster_selection_method": "eom",
+      "label": "fit5000000",
+      "coordinate_load_seconds": 0.18,
+      "status": "ok",
+      "backend": "cuml",
+      "fit_seconds": 469.9,
+      "seconds_per_million_fit_rows": 93.97,
+      "n_clusters": 856,
+      "fit_noise_fraction": 0.07512,
+      "dbcv": null,
+      "memory": {
+        "backend": "pynvml",
+        "baseline_used_gb": 9.944,
+        "peak_used_gb": 9.944,
+        "delta_gb": 0.0,
+        "samples": 940
+      },
+      "labels_saved": true,
+      "held_rows": 152501580,
+      "predict": [
+        {
+          "probe_rows": 50000,
+          "seconds": 0.997,
+          "seconds_per_million": 19.947,
+          "extrapolated_held_seconds": 3042.0,
+          "extrapolated_held_minutes": 50.7,
+          "extrapolated_cohort_minutes": 52.36,
+          "noise_fraction": 0.16802
+        },
+        {
+          "probe_rows": 200000,
+          "seconds": 3.96,
+          "seconds_per_million": 19.802,
+          "extrapolated_held_seconds": 3019.9,
+          "extrapolated_held_minutes": 50.33,
+          "extrapolated_cohort_minutes": 51.98,
+          "noise_fraction": 0.16791
+        },
+        {
+          "probe_rows": 500000,
+          "seconds": 9.924,
+          "seconds_per_million": 19.847,
+          "extrapolated_held_seconds": 3026.7,
+          "extrapolated_held_minutes": 50.45,
+          "extrapolated_cohort_minutes": 52.1,
+          "noise_fraction": 0.16903
+        }
+      ],
+      "predict_rate_spread": 1.007,
+      "eval_probe_seconds": 39.99,
+      "eval_probe_noise_fraction": 0.16968,
+      "eval_probe_clusters_hit": 856,
+      "eval_probe_saved": true,
+      "model_path": "/home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests/hdbscan_scaling/models/hdbscan_fit5000000.joblib",
+      "model_size_mb": 560.2
+    },
+    {
+      "fit_rows": 10000000,
+      "min_cluster_size": 1000,
+      "min_samples": 5,
+      "cluster_selection_method": "eom",
+      "label": "fit10000000",
+      "coordinate_load_seconds": 0.18,
+      "status": "ok",
+      "backend": "cuml",
+      "fit_seconds": 1869.6,
+      "seconds_per_million_fit_rows": 186.96,
+      "n_clusters": 666,
+      "fit_noise_fraction": 0.04945,
+      "dbcv": null,
+      "memory": {
+        "backend": "pynvml",
+        "baseline_used_gb": 9.944,
+        "peak_used_gb": 9.944,
+        "delta_gb": 0.0,
+        "samples": 3739
+      },
+      "labels_saved": true,
+      "held_rows": 147501580,
+      "predict": [
+        {
+          "probe_rows": 50000,
+          "seconds": 2.132,
+          "seconds_per_million": 42.631,
+          "extrapolated_held_seconds": 6288.1,
+          "extrapolated_held_minutes": 104.8,
+          "extrapolated_cohort_minutes": 111.91,
+          "noise_fraction": 0.11732
+        },
+        {
+          "probe_rows": 200000,
+          "seconds": 8.767,
+          "seconds_per_million": 43.833,
+          "extrapolated_held_seconds": 6465.4,
+          "extrapolated_held_minutes": 107.76,
+          "extrapolated_cohort_minutes": 115.06,
+          "noise_fraction": 0.11794
+        },
+        {
+          "probe_rows": 500000,
+          "seconds": 21.893,
+          "seconds_per_million": 43.786,
+          "extrapolated_held_seconds": 6458.5,
+          "extrapolated_held_minutes": 107.64,
+          "extrapolated_cohort_minutes": 114.94,
+          "noise_fraction": 0.11838
+        }
+      ],
+      "predict_rate_spread": 1.028,
+      "eval_probe_seconds": 88.05,
+      "eval_probe_noise_fraction": 0.1189,
+      "eval_probe_clusters_hit": 666,
+      "eval_probe_saved": true,
+      "model_path": "/home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests/hdbscan_scaling/models/hdbscan_fit10000000.joblib",
+      "model_size_mb": 1120.3
+    },
+    {
+      "fit_rows": 15000000,
+      "min_cluster_size": 1500,
+      "min_samples": 5,
+      "cluster_selection_method": "eom",
+      "label": "fit15000000",
+      "coordinate_load_seconds": 0.15,
+      "status": "ok",
+      "backend": "cuml",
+      "fit_seconds": 4562.1,
+      "seconds_per_million_fit_rows": 304.14,
+      "n_clusters": 555,
+      "fit_noise_fraction": 0.03594,
+      "dbcv": null,
+      "memory": {
+        "backend": "pynvml",
+        "baseline_used_gb": 9.944,
+        "peak_used_gb": 23.444,
+        "delta_gb": 13.5,
+        "samples": 9122
+      },
+      "labels_saved": true,
+      "held_rows": 142501580,
+      "predict": [
+        {
+          "probe_rows": 50000,
+          "seconds": 3.17,
+          "seconds_per_million": 63.392,
+          "extrapolated_held_seconds": 9033.5,
+          "extrapolated_held_minutes": 150.56,
+          "extrapolated_cohort_minutes": 166.41,
+          "noise_fraction": 0.08694
+        },
+        {
+          "probe_rows": 200000,
+          "seconds": 12.919,
+          "seconds_per_million": 64.596,
+          "extrapolated_held_seconds": 9205.0,
+          "extrapolated_held_minutes": 153.42,
+          "extrapolated_cohort_minutes": 169.57,
+          "noise_fraction": 0.08729
+        },
+        {
+          "probe_rows": 500000,
+          "seconds": 32.421,
+          "seconds_per_million": 64.843,
+          "extrapolated_held_seconds": 9240.2,
+          "extrapolated_held_minutes": 154.0,
+          "extrapolated_cohort_minutes": 170.21,
+          "noise_fraction": 0.08775
+        }
+      ],
+      "predict_rate_spread": 1.023,
+      "eval_probe_seconds": 132.08,
+      "eval_probe_noise_fraction": 0.08767,
+      "eval_probe_clusters_hit": 555,
+      "eval_probe_saved": true,
+      "model_path": "/home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests/hdbscan_scaling/models/hdbscan_fit15000000.joblib",
+      "model_size_mb": 1680.3
+    },
+    {
+      "fit_rows": 25000000,
+      "min_cluster_size": 2500,
+      "min_samples": 5,
+      "cluster_selection_method": "eom",
+      "label": "fit25000000",
+      "coordinate_load_seconds": 0.2,
+      "status": "ok",
+      "backend": "cuml",
+      "fit_seconds": 11684.0,
+      "seconds_per_million_fit_rows": 467.36,
+      "n_clusters": 442,
+      "fit_noise_fraction": 0.02464,
+      "dbcv": null,
+      "memory": {
+        "backend": "pynvml",
+        "baseline_used_gb": 23.444,
+        "peak_used_gb": 23.444,
+        "delta_gb": 0.0,
+        "samples": 23361
+      },
+      "labels_saved": true,
+      "held_rows": 132501580,
+      "predict": [
+        {
+          "probe_rows": 50000,
+          "seconds": 5.346,
+          "seconds_per_million": 106.917,
+          "extrapolated_held_seconds": 14166.7,
+          "extrapolated_held_minutes": 236.11,
+          "extrapolated_cohort_minutes": 280.66,
+          "noise_fraction": 0.0563
+        },
+        {
+          "probe_rows": 200000,
+          "seconds": 21.669,
+          "seconds_per_million": 108.343,
+          "extrapolated_held_seconds": 14355.6,
+          "extrapolated_held_minutes": 239.26,
+          "extrapolated_cohort_minutes": 284.4,
+          "noise_fraction": 0.05577
+        },
+        {
+          "probe_rows": 500000,
+          "seconds": 54.455,
+          "seconds_per_million": 108.91,
+          "extrapolated_held_seconds": 14430.8,
+          "extrapolated_held_minutes": 240.51,
+          "extrapolated_cohort_minutes": 285.89,
+          "noise_fraction": 0.0562
+        }
+      ],
+      "predict_rate_spread": 1.019,
+      "eval_probe_seconds": 219.56,
+      "eval_probe_noise_fraction": 0.05622,
+      "eval_probe_clusters_hit": 442,
+      "eval_probe_saved": true,
+      "model_path": "/home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests/hdbscan_scaling/models/hdbscan_fit25000000.joblib",
+      "model_size_mb": 2800.3
+    },
+    {
+      "fit_rows": 50000000,
+      "min_cluster_size": 5000,
+      "min_samples": 5,
+      "cluster_selection_method": "eom",
+      "label": "fit50000000",
+      "coordinate_load_seconds": 0.39,
+      "status": "failed",
+      "error_type": "MemoryError",
+      "error": "std::bad_alloc: out_of_memory: RMM failure at:/tmp/conda-bld-output/bld/rattler-build_librmm/work/cpp/src/mr/detail/pool_memory_resource_impl.cpp:71: Maximum pool size exceeded (failed to allocate 11.178054 GiB): Not enough room to grow, current/max/try size = 33.720348 GiB, 36.000000 GiB, 11.178054 GiB",
+      "fit_seconds": 46450.1,
+      "memory": {
+        "backend": "pynvml",
+        "baseline_used_gb": 23.444,
+        "peak_used_gb": 23.444,
+        "delta_gb": 0.0,
+        "samples": 92872
+      }
+    }
+  ],
+  "extra_min_samples_probe": {
+    "fit_rows": 25000000,
+    "min_cluster_size": 2500,
+    "min_samples": 15,
+    "cluster_selection_method": "eom",
+    "label": "fit25000000_ms15",
+    "coordinate_load_seconds": 0.2,
+    "status": "failed",
+    "error_type": "MemoryError",
+    "error": "std::bad_alloc: out_of_memory: RMM failure at:/tmp/conda-bld-output/bld/rattler-build_librmm/work/cpp/src/mr/detail/pool_memory_resource_impl.cpp:71: Maximum pool size exceeded (failed to allocate 5.960464 GiB): Not enough room to grow, current/max/try size = 33.720348 GiB, 36.000000 GiB, 5.960464 GiB",
+    "fit_seconds": 11714.5,
+    "memory": {
+      "backend": "pynvml",
+      "baseline_used_gb": 34.665,
+      "peak_used_gb": 34.665,
+      "delta_gb": 0.0,
+      "samples": 23423
+    }
+  },
+  "stopped_early": true,
+  "total_seconds": 77473.7
+}

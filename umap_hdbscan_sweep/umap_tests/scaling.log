@@ -1,0 +1,82 @@
+[14:22:56] coords: 157,501,580 x 2 from coords.npy
+[gpu] device 47.3 GB total, 46.8 GB free (0.4 GB held by other processes); this stage wants 40.0 GB
+[gpu_budget] cap 40.0 GB of 47.27 GB = torch 4.0 GB (fraction 0.0846) + rmm pool 36.0 GB
+[14:23:08] eval probe 2,000,000 rows, timing probe 500,000 rows, fit sizes 500,000, 1,000,000, 5,000,000, 10,000,000, 15,000,000, 25,000,000, 50,000,000
+[14:23:08] min_cluster_size per size: 500,000->50, 1,000,000->100, 5,000,000->500, 10,000,000->1000, 15,000,000->1500, 25,000,000->2500, 50,000,000->5000
+[14:23:08] [fit500000] loading 500,000 coordinate rows (mcs=50, ms=5) ...
+[14:23:08] [fit500000] fitting HDBSCAN ...
+[14:23:15] [fit500000]   fit in 7.2s (backend=cuml, 1,338 clusters, 17.6% noise, peak 9.9 GB)
+[14:23:15] [fit500000]   predict  50,000 rows in   0.10s =    2.06 s/M ->    5.4 min for 157,001,580 held rows
+[14:23:16] [fit500000]   predict 200,000 rows in   0.41s =    2.03 s/M ->    5.3 min for 157,001,580 held rows
+[14:23:17] [fit500000]   predict 500,000 rows in   1.01s =    2.02 s/M ->    5.3 min for 157,001,580 held rows
+[14:23:17] [fit500000]   labelling the 2,000,000-row eval probe ...
+[14:23:21] [fit500000]   model saved (56 MB)
+[14:23:21] [fit1000000] loading 1,000,000 coordinate rows (mcs=100, ms=5) ...
+[14:23:21] [fit1000000] fitting HDBSCAN ...
+[14:23:45] [fit1000000]   fit in 23.6s (backend=cuml, 1,246 clusters, 14.7% noise, peak 9.9 GB)
+[14:23:45] [fit1000000]   predict  50,000 rows in   0.20s =    4.05 s/M ->   10.6 min for 156,501,580 held rows
+[14:23:46] [fit1000000]   predict 200,000 rows in   0.80s =    4.01 s/M ->   10.5 min for 156,501,580 held rows
+[14:23:48] [fit1000000]   predict 500,000 rows in   2.00s =    4.00 s/M ->   10.4 min for 156,501,580 held rows
+[14:23:48] [fit1000000]   labelling the 2,000,000-row eval probe ...
+[14:23:56] [fit1000000]   model saved (112 MB)
+[14:23:56] [fit5000000] loading 5,000,000 coordinate rows (mcs=500, ms=5) ...
+[14:23:56] [fit5000000] fitting HDBSCAN ...
+[14:31:46] [fit5000000]   fit in 469.9s (backend=cuml, 856 clusters, 7.5% noise, peak 9.9 GB)
+[14:31:47] [fit5000000]   predict  50,000 rows in   1.00s =   19.95 s/M ->   50.7 min for 152,501,580 held rows
+[14:31:51] [fit5000000]   predict 200,000 rows in   3.96s =   19.80 s/M ->   50.3 min for 152,501,580 held rows
+[14:32:01] [fit5000000]   predict 500,000 rows in   9.92s =   19.85 s/M ->   50.5 min for 152,501,580 held rows
+[14:32:01] [fit5000000]   labelling the 2,000,000-row eval probe ...
+[14:32:41] [fit5000000]   model saved (560 MB)
+[14:32:41] [fit10000000] loading 10,000,000 coordinate rows (mcs=1000, ms=5) ...
+[14:32:42] [fit10000000] fitting HDBSCAN ...
+[15:03:51] [fit10000000]   fit in 1869.6s (backend=cuml, 666 clusters, 4.9% noise, peak 9.9 GB)
+[15:03:54] [fit10000000]   predict  50,000 rows in   2.13s =   42.63 s/M ->  104.8 min for 147,501,580 held rows
+[15:04:02] [fit10000000]   predict 200,000 rows in   8.77s =   43.83 s/M ->  107.8 min for 147,501,580 held rows
+[15:04:24] [fit10000000]   predict 500,000 rows in  21.89s =   43.79 s/M ->  107.6 min for 147,501,580 held rows
+[15:04:24] [fit10000000]   labelling the 2,000,000-row eval probe ...
+[15:05:53] [fit10000000]   model saved (1120 MB)
+[15:05:53] [fit15000000] loading 15,000,000 coordinate rows (mcs=1500, ms=5) ...
+[15:05:53] [fit15000000] fitting HDBSCAN ...
+[16:21:55] [fit15000000]   fit in 4562.1s (backend=cuml, 555 clusters, 3.6% noise, peak 23.4 GB)
+[16:21:59] [fit15000000]   predict  50,000 rows in   3.17s =   63.39 s/M ->  150.6 min for 142,501,580 held rows
+[16:22:12] [fit15000000]   predict 200,000 rows in  12.92s =   64.60 s/M ->  153.4 min for 142,501,580 held rows
+[16:22:44] [fit15000000]   predict 500,000 rows in  32.42s =   64.84 s/M ->  154.0 min for 142,501,580 held rows
+[16:22:44] [fit15000000]   labelling the 2,000,000-row eval probe ...
+[16:24:57] [fit15000000]   model saved (1680 MB)
+[16:24:57] [fit25000000] loading 25,000,000 coordinate rows (mcs=2500, ms=5) ...
+[16:24:57] [fit25000000] fitting HDBSCAN ...
+[19:39:41] [fit25000000]   fit in 11684.0s (backend=cuml, 442 clusters, 2.5% noise, peak 23.4 GB)
+[19:39:47] [fit25000000]   predict  50,000 rows in   5.35s =  106.92 s/M ->  236.1 min for 132,501,580 held rows
+[19:40:08] [fit25000000]   predict 200,000 rows in  21.67s =  108.34 s/M ->  239.3 min for 132,501,580 held rows
+[19:41:03] [fit25000000]   predict 500,000 rows in  54.46s =  108.91 s/M ->  240.5 min for 132,501,580 held rows
+[19:41:03] [fit25000000]   labelling the 2,000,000-row eval probe ...
+[19:44:44] [fit25000000]   model saved (2800 MB)
+[19:44:44] [fit50000000] loading 50,000,000 coordinate rows (mcs=5000, ms=5) ...
+[19:44:44] [fit50000000] fitting HDBSCAN ...
+[1178542][08:38:54:907964][error ] [A][Stream 0x2][Upstream 12002344192B][FAILURE maximum pool size exceeded: Not enough room to grow, current/max/try size = 33.720348 GiB, 36.000000 GiB, 11.178054 GiB]
+[08:38:54] [fit50000000] FAILED after 46450s: MemoryError: std::bad_alloc: out_of_memory: RMM failure at:/tmp/conda-bld-output/bld/rattler-build_librmm/work/cpp/src/mr/detail/pool_memory_resource_impl.cpp:71: Maximum pool size exceeded (failed to allocate 11.
+[08:38:55] stopping: fit50000000 -- the fit ran out of memory, and sizes ascend so nothing larger can do better. Pass --continue-after-failure to try them anyway.
+[08:38:55] extra probe: refitting 25,000,000 rows at min_samples=15 to measure the memory delta
+[08:38:55] [fit25000000_ms15] loading 25,000,000 coordinate rows (mcs=2500, ms=15) ...
+[08:38:55] [fit25000000_ms15] fitting HDBSCAN ...
+[1178542][11:54:09:878016][error ] [A][Stream 0x2][Upstream 6400000000B][FAILURE maximum pool size exceeded: Not enough room to grow, current/max/try size = 33.720348 GiB, 36.000000 GiB, 5.960464 GiB]
+[11:54:09] [fit25000000_ms15] FAILED after 11714s: MemoryError: std::bad_alloc: out_of_memory: RMM failure at:/tmp/conda-bld-output/bld/rattler-build_librmm/work/cpp/src/mr/detail/pool_memory_resource_impl.cpp:71: Maximum pool size exceeded (failed to allocate 5.9
+[11:54:10] wrote /home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests/hdbscan_scaling/scaling_results.json
+
+-- HDBSCAN fit-size scaling ---------------------------------------------
+   fit rows    mcs   clusters   noise      fit s    s/M fit   peak GB   predict s/M
+    500,000     50      1,338   17.6%        7.2      14.5      9.9         2.02
+  1,000,000    100      1,246   14.7%       23.6      23.6      9.9         4.00
+  5,000,000    500        856    7.5%      469.9      94.0      9.9        19.85
+ 10,000,000   1000        666    4.9%     1869.6     187.0      9.9        43.79
+ 15,000,000   1500        555    3.6%     4562.1     304.1     23.4        64.84
+ 25,000,000   2500        442    2.5%    11684.0     467.4     23.4       108.91
+ 50,000,000   5000   FIT FAILED: MemoryError
+
+min_samples probe at ms=15: FAILED (MemoryError) -- ms=15 is out of reach at 25,000,000 rows, so cap the later sweep below it
+-------------------------------------------------------------------------
+
+fit cost scales as N^1.89 between 500,000 and 25,000,000 rows
+predict rate 2.0 -> 108.9 s/M over the same range (53.97x for a 50x larger fit set)
+  -> predict cost grows with fit-set size; budget the labelling pass from
+     the rate at the size you actually choose, not from the 5M measurement.
