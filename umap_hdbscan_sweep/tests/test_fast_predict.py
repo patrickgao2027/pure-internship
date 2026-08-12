@@ -79,6 +79,26 @@ def test_noise_points_are_reproduced():
     assert (probabilities[labels < 0] == 0).all()
 
 
+def test_batching_does_not_change_the_answer():
+    """predict() batches the whole pipeline, not just the kNN, because the neighbour arrays
+    (2*min_samples per row, distances + indices + the mutual-reachability copy) are what
+    would need ~32 GB on the 132.5M-row cohort. Chunking must be transparent: a batch
+    boundary falling mid-run cannot alter any label or probability."""
+    fit = make_blobs(5000, seed=8)
+    query = make_blobs(2000, seed=9)
+
+    clusterer = hdbscan.HDBSCAN(min_cluster_size=50, min_samples=5,
+                                cluster_selection_method="eom", prediction_data=True)
+    clusterer.fit(fit)
+    tables = build_tables(clusterer, n_fit=fit.shape[0])
+
+    whole = predict(tables, fit, query, backend="sklearn", batch_rows=10**9)
+    for batch_rows in (1, 7, 333, 1999, 2000, 2001):
+        chunked = predict(tables, fit, query, backend="sklearn", batch_rows=batch_rows)
+        np.testing.assert_array_equal(chunked[0], whole[0])
+        np.testing.assert_array_equal(chunked[1], whole[1])
+
+
 def test_cluster_labels_recovered_without_prediction_data():
     """cuML models have no `prediction_data_`, so build_tables falls back to recovering the
     cluster->label map from `labels_`. That fallback must give the same answer as the map."""

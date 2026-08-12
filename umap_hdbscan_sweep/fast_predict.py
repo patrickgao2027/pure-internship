@@ -138,12 +138,24 @@ def build_tables(clusterer, n_fit: int, min_samples: int | None = None) -> Predi
     cluster_label = _cluster_labels(clusterer, raw_tree, max_cluster, parent_of,
                                     is_cluster_row, parents, children)
 
-    # A cluster below a selected one inherits the SELECTED ancestor's max lambda, not its
-    # own (PredictionData.__init__: `self.max_lambdas[sub_cluster] = self.max_lambdas[cluster]`).
+    # A cluster below a selected one inherits the SELECTED ancestor's max lambda, not its own
+    # (PredictionData.__init__: `self.max_lambdas[sub_cluster] = self.max_lambdas[cluster]`).
     # Probabilities are normalised by the selected cluster's scale, so using each cluster's
-    # own maximum here silently inflates the probability of points that land on a descendant.
-    # The selected cluster is the topmost ancestor still carrying the same label.
-    max_lambda = own_max_lambda[_selected_ancestor(cluster_label, parent_of)]
+    # own maximum silently inflates the probability of points landing on a descendant -- it
+    # leaves labels correct, which is what makes it easy to miss.
+    #
+    # Prefer the model's own dict: it is literally the table the reference indexes, so taking
+    # it removes a reconstruction step from the trusted path. Rebuild it only when the model
+    # has no prediction_data_ (walking to the topmost ancestor carrying the same label gives
+    # the selected cluster, which is the same mapping the reference builds recursively).
+    max_lambda = np.zeros(max_cluster, dtype=np.float64)
+    prediction_data = getattr(clusterer, "prediction_data_", None)
+    model_max_lambdas = getattr(prediction_data, "max_lambdas", None) if prediction_data else None
+    if model_max_lambdas:
+        for cluster, value in model_max_lambdas.items():
+            max_lambda[int(cluster)] = float(value)
+    else:
+        max_lambda = own_max_lambda[_selected_ancestor(cluster_label, parent_of)]
 
     return PredictionTables(
         core_distances=core_distances.astype(np.float64),
@@ -359,11 +371,33 @@ def predict_from_neighbours(tables: PredictionTables, neighbour_distances: np.nd
 
 def predict(tables: PredictionTables, fit_coords: np.ndarray, query_coords: np.ndarray,
             backend: str = "rbc", batch_rows: int = 5_000_000,
-            index=None) -> tuple[np.ndarray, np.ndarray]:
+            index=None, progress_every: int = 0) -> tuple[np.ndarray, np.ndarray]:
+    """Label query points, batching the WHOLE pipeline rather than only the kNN.
+
+    The neighbour arrays are the memory driver, not the coordinates: k = 2*min_samples
+    neighbours per point at 8 bytes each, times distances + indices, times another copy for
+    the mutual-reachability matrix. At min_samples=5 that is ~240 bytes per query row, so
+    labelling the 132.5M held rows in one shot would want ~32 GB of host RAM before anything
+    is written. Batching end-to-end holds it at batch_rows * 240 bytes (~1.2 GB at 5M) and
+    keeps only the int32/float32 outputs, which are 8 bytes per row.
+    """
     k = 2 * tables.min_samples
-    distances, indices = knn_query(fit_coords, query_coords, k, backend=backend,
-                                   batch_rows=batch_rows, index=index)
-    return predict_from_neighbours(tables, distances, indices)
+    if index is None:
+        index = build_index(fit_coords, k, backend)
+
+    n_query = query_coords.shape[0]
+    label_chunks, probability_chunks = [], []
+    for start in range(0, n_query, batch_rows):
+        chunk = query_coords[start:start + batch_rows]
+        distances, indices = knn_query(fit_coords, chunk, k, backend=backend,
+                                       batch_rows=batch_rows, index=index)
+        chunk_labels, chunk_probabilities = predict_from_neighbours(tables, distances, indices)
+        label_chunks.append(chunk_labels)
+        probability_chunks.append(chunk_probabilities)
+        del distances, indices
+        if progress_every and (start // batch_rows) % progress_every == 0:
+            log(f"    {min(start + batch_rows, n_query):,} / {n_query:,} rows")
+    return np.concatenate(label_chunks), np.concatenate(probability_chunks)
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
@@ -463,6 +497,11 @@ def main() -> None:
     fit_coords = np.array(coords[fit_idx], dtype=np.float32)
     log(f"fit set {fit_coords.shape[0]:,} x {fit_coords.shape[1]}")
 
+    # First touch of prediction_data_ on a joblib-loaded cuML model regenerates it on the GPU
+    # (its C++/GPU state does not always pickle), which on 25M rows is minutes of real work
+    # with no output. Say so, otherwise it reads as a hang.
+    log("building prediction tables (a cuML model regenerates prediction data on first "
+        "access after a joblib load -- minutes at 25M rows; nvidia-smi will show it working)")
     tables = build_tables(model, n_fit=fit_coords.shape[0], min_samples=args.min_samples)
     log(f"tables built: min_samples={tables.min_samples}, "
         f"{int((tables.cluster_label >= 0).sum()):,} mapped clusters, "
