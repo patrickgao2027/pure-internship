@@ -118,6 +118,31 @@ def homogeneity_completeness(counts, rows, cols) -> tuple[float, float]:
     return homogeneity, completeness
 
 
+def variation_of_information(counts, rows, cols) -> tuple[float, float, float]:
+    """Meila's VI = H(A|B) + H(B|A), returned with its two halves.
+
+    VI is the principled version of what purity measures here, and the reason it is the right
+    metric for this comparison is its behaviour under refinement: it is a true metric on the
+    lattice of partitions, and when one clustering is a refinement of the other the two are in
+    a covering relation where VI collapses to |H(A) - H(B)| (Meila 2003, 2007).
+
+    Concretely, the conditional term is the exact test:
+
+        H(coarse | fine) == 0   <=>   every fine cluster lies wholly inside one coarse
+                                      cluster, i.e. the coarse clustering is a clean merge
+
+    so the fine->coarse direction going to zero is not a heuristic threshold but an identity.
+    Units are nats; VI is bounded above by log(n) and is NOT normalised, so compare VI values
+    only across pairs on the same probe (which is exactly what this script does).
+    """
+    n = int(counts.sum())
+    h_rows, h_cols = _entropy(rows, n), _entropy(cols, n)
+    mi = mutual_information(counts, rows, cols)
+    h_a_given_b = max(h_rows - mi, 0.0)
+    h_b_given_a = max(h_cols - mi, 0.0)
+    return h_a_given_b + h_b_given_a, h_a_given_b, h_b_given_a
+
+
 def mapping_purity(counts: np.ndarray, rows: np.ndarray) -> float:
     """Fraction of points whose column label is the modal column label of their row cluster.
 
@@ -186,6 +211,10 @@ def compare(a: np.ndarray, b: np.ndarray, mask: np.ndarray | None) -> dict:
         result["completeness_a_to_b"] = round(completeness, 4)
         result["purity_a_to_b"] = round(mapping_purity(c2, r2), 4)
         result["purity_b_to_a"] = round(mapping_purity(c2.T, k2), 4)
+        vi, h_a_given_b, h_b_given_a = variation_of_information(c2, r2, k2)
+        result["variation_of_information"] = round(vi, 4)
+        result["h_b_given_a"] = round(h_b_given_a, 4)   # 0 <=> b is a clean merge of a
+        result["h_a_given_b"] = round(h_a_given_b, 4)
         result["clusters_a"] = int(np.unique(a[both]).size)
         result["clusters_b"] = int(np.unique(b[both]).size)
     return result
@@ -277,7 +306,8 @@ def main() -> None:
     # The ladder is the actual decision: each fit size against the next one up. If the last
     # rung is a clean coarsening, the larger fit bought nothing but hours.
     print("\nconsecutive ladder -- each size vs the next one up")
-    print(f"{'pair':>22}{'ARI':>8}{'fine->coarse':>15}{'coarse->fine':>14}{'both clust.':>13}")
+    print(f"{'pair':>22}{'ARI':>8}{'fine->coarse':>15}{'H(coarse|fine)':>16}"
+          f"{'VI':>8}{'both clust.':>13}")
     for a_name, b_name in zip(names, names[1:]):
         record = pairs[f"{a_name} vs {b_name}"]
         if "ari" not in record:
@@ -285,13 +315,17 @@ def main() -> None:
         print(f"{a_name + ' -> ' + b_name:>22}"
               f"{record['ari']:>8.3f}"
               f"{record['purity_a_to_b']:>15.3f}"
-              f"{record['purity_b_to_a']:>14.3f}"
+              f"{record['h_b_given_a']:>16.4f}"
+              f"{record['variation_of_information']:>8.3f}"
               f"{record['both_clustered_fraction'] * 100:>12.1f}%")
 
-    print("\n  fine->coarse ~1.0  : every cluster of the smaller fit sits inside one cluster")
-    print("                       of the larger. A clean coarsening -- boundaries did not move.")
-    print("  fine->coarse <0.95 : boundaries genuinely shifted. The larger fit is finding")
-    print("                       different structure, not just merging.")
+    print("\n  H(coarse|fine) = 0 : identity, not a threshold -- every cluster of the smaller")
+    print("                       fit lies wholly inside one cluster of the larger. A clean")
+    print("                       coarsening: the extra rows merged, they did not re-cut.")
+    print("  H(coarse|fine) > 0 : boundaries genuinely moved. Read alongside fine->coarse,")
+    print("                       which says how much of the mass moved (nats vs fraction).")
+    print("  VI (nats)          : Meila's metric, H(a|b)+H(b|a). Comparable across the rows")
+    print("                       of this table only -- it is unnormalised.")
 
     output = args.output or labels_dir.parent / "cross_size_agreement.json"
     output.write_text(json.dumps({
