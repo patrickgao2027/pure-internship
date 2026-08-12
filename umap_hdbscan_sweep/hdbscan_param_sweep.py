@@ -137,29 +137,79 @@ def build_grid(fit_sizes: list[int], min_cluster_sizes: list[int], min_samples: 
 
 # ── one cell ───────────────────────────────────────────────────────────────────
 
-def trinuc_counts_from_labels(context_path: Path, labels: np.ndarray) -> "pl.DataFrame":
-    """Group the cohort by (cluster, REF, ALT, X_PREV1, X_NEXT1) -- rvcp's input shape.
+def build_sbs96_index(context_path: Path, row_order: list[str], cache_path: Path) -> np.ndarray:
+    """Collapse each cohort row's context to one int8: its position in the 96-channel order.
 
-    ``run_variant_cluster_pipeline`` normally gets this from DuckDB over an analysis parquet
-    carrying a ``cluster_label`` column. Here the labels are an in-memory array, so the
-    group-by is done directly against ``context.parquet`` instead of writing a ~2 GB labelled
-    parquet per cell. The output columns are exactly what ``annotate_trinuc_counts`` expects,
-    so the SBS96 canonicalisation itself is still rvcp's and is not reimplemented.
+    Done ONCE and cached (157 MB), because the alternative is paying it per cell 28 times.
+    The canonicalisation itself is imported from ``stage3_apply_full`` -- existing repo code,
+    documented and tested as identical to ``rvcp.annotate_trinuc_counts`` -- rather than
+    written a third time.
+
+    Streamed by row group so peak memory is one group, not 157.5M strings.
     """
-    frame = pl.read_parquet(context_path, columns=["REF", "ALT", "X_PREV1", "X_NEXT1"])
-    if frame.height != labels.shape[0]:
-        raise SystemExit(
-            f"context.parquet has {frame.height:,} rows but the labelling has "
-            f"{labels.shape[0]:,} -- they must come from the same stage-1 run")
-    return (
-        frame.with_columns(pl.Series("cluster_label", labels))
-        .filter(pl.col("cluster_label") >= 0)
-        .group_by(["cluster_label", "REF", "ALT", "X_PREV1", "X_NEXT1"])
-        .agg(pl.len().alias("count"))
-    )
+    import pyarrow.parquet as pq
+
+    from stage3_apply_full import sbs96_expr
+
+    position = {label: index for index, label in enumerate(row_order)}
+    parquet_file = pq.ParquetFile(context_path)
+    total = parquet_file.metadata.num_rows
+    log(f"building SBS96 index over {total:,} rows (one-off, cached)")
+
+    index = np.empty(total, dtype=np.int8)
+    written = 0
+    for group in range(parquet_file.num_row_groups):
+        frame = pl.from_arrow(parquet_file.read_row_group(
+            group, columns=["REF", "ALT", "X_PREV1", "X_NEXT1"]))
+        labels = frame.select(sbs96_expr().alias("sbs96"))["sbs96"].to_numpy()
+        codes = np.fromiter((position.get(label, -1) for label in labels),
+                            dtype=np.int8, count=len(labels))
+        index[written:written + codes.size] = codes
+        written += codes.size
+
+    if written != total:
+        raise RuntimeError(f"read {written:,} rows but metadata said {total:,}")
+    np.save(cache_path, index)
+    log(f"  {float((index >= 0).mean()) * 100:.2f}% of rows carry an SBS96 context")
+    return index
 
 
-def run_cell(cell: Cell, coords: np.ndarray, cell_dir: Path, args) -> dict:
+def load_or_build_index(context_path: Path, row_order: list[str], output_dir: Path) -> np.ndarray:
+    cache_path = output_dir / "sbs96_index.npy"
+    if cache_path.exists():
+        index = np.load(cache_path, mmap_mode="r")
+        log(f"SBS96 index cache hit: {index.shape[0]:,} rows")
+        return index
+    return build_sbs96_index(Path(context_path), row_order, cache_path)
+
+
+def sbs96_counts(sbs96_index: np.ndarray, labels: np.ndarray, n_clusters: int,
+                 chunk_rows: int = 20_000_000) -> np.ndarray:
+    """96 x n_clusters counts over the whole cohort.
+
+    ``bincount`` on a flattened (channel, cluster) index rather than the ``np.add.at`` that
+    ``stage3_apply_full`` uses: np.add.at is unbuffered and runs at roughly a million updates
+    per second, which is minutes per cell over 157.5M rows. Same arithmetic, ~50x faster.
+
+    Chunked because the flattened index is int64 -- one 157.5M-row array is 1.3 GB of scratch
+    nothing reads back.
+    """
+    counts = np.zeros(96 * n_clusters, dtype=np.int64)
+    for start in range(0, labels.shape[0], chunk_rows):
+        stop = min(start + chunk_rows, labels.shape[0])
+        channels = np.asarray(sbs96_index[start:stop]).astype(np.int64)
+        clusters = np.asarray(labels[start:stop]).astype(np.int64)
+        keep = (channels >= 0) & (clusters >= 0) & (clusters < n_clusters)
+        if not keep.any():
+            continue
+        counts += np.bincount(channels[keep] * n_clusters + clusters[keep],
+                              minlength=counts.size)
+    return counts.reshape(96, n_clusters)
+
+
+def run_cell(cell: Cell, coords: np.ndarray, cell_dir: Path, args,
+             sbs96_index: np.ndarray | None = None, row_order: list[str] | None = None,
+             signature_database: Path | None = None) -> dict:
     """Fit, label the whole cohort, save the labels, then score it. Writes as it goes."""
     import fast_predict
 
@@ -219,17 +269,58 @@ def run_cell(cell: Cell, coords: np.ndarray, cell_dir: Path, args) -> dict:
     log(f"    {record['label_seconds']}s, "
         f"{record['cohort_noise_fraction'] * 100:.2f}% cohort noise")
 
-    if args.context:
-        _score_cell(record, cell_dir, Path(args.context), labels, args)
+    if not args.skip_geometry:
+        _score_geometry(record, fit_coords, fit_labels, clusterer, args)
+
+    if sbs96_index is not None:
+        _score_cell(record, cell_dir, sbs96_index, labels, row_order,
+                    signature_database, args)
 
     record["finished"] = datetime.now(timezone.utc).isoformat()
     (cell_dir / "metrics.json").write_text(json.dumps(record, indent=2))
     return record
 
 
-def _score_cell(record: dict, cell_dir: Path, context_path: Path, labels: np.ndarray,
-                args) -> None:
-    """SBS96 matrix -> SigProfiler -> metrics, all through run_variant_cluster_pipeline.
+def _score_geometry(record: dict, fit_coords: np.ndarray, fit_labels: np.ndarray,
+                    clusterer, args) -> None:
+    """DBCV, probabilities, persistence, connectivity -- on the FIT set.
+
+    The fit set, not the cohort: DBCV is O(n^2)-ish and connectivity needs a kNN, neither of
+    which is affordable over 157.5M rows, and the geometry question is about the model the
+    fit produced. Failures are swallowed for the same reason scoring is -- these are
+    diagnostics, not something worth losing hours of fitting over.
+    """
+    import cluster_quality
+
+    try:
+        started = perf_counter()
+        probabilities = getattr(clusterer, "probabilities_", None)
+        record["geometry"] = cluster_quality.summarise(
+            fit_coords, fit_labels,
+            probabilities=None if probabilities is None else _to_host(probabilities),
+            clusterer=clusterer,
+            connectivity_rows=args.connectivity_rows,
+            dbcv_rows=args.dbcv_rows,
+            dbcv_max_clusters=args.dbcv_max_clusters,
+            seed=args.seed)
+        record["geometry_seconds"] = round(perf_counter() - started, 1)
+        geometry = record["geometry"]
+        log(f"    DBCV {geometry.get('dbcv')}, "
+            f"connectivity {geometry.get('connectivity_mean', float('nan')):.3f}, "
+            f"prob mean {geometry.get('prob_mean', float('nan')):.3f}")
+    except Exception as exc:  # noqa: BLE001
+        record["geometry_error"] = f"{type(exc).__name__}: {exc}"
+        log(f"  geometry metrics failed: {type(exc).__name__}: {str(exc)[:200]}")
+
+
+def _score_cell(record: dict, cell_dir: Path, sbs96_index: np.ndarray, labels: np.ndarray,
+                row_order: list[str], signature_database: Path, args) -> None:
+    """SBS96 matrix -> SigProfiler -> metrics.
+
+    The matrix is built from the cached int8 index rather than re-reading context.parquet per
+    cell. SigProfiler itself is ``rvcp.Analyzer.cosmic_fit`` -- the same CPU call every other
+    stage in this repo makes, and the same one stage3_apply_full uses. There is no GPU
+    SigProfiler and it would not help: cosmic_fit only ever sees a 96 x n_clusters matrix.
 
     Scoring failures are recorded and swallowed. The labelling above is the expensive part
     (up to 3.25 h of fitting); losing it because SigProfiler tripped over one cell would be
@@ -240,26 +331,48 @@ def _score_cell(record: dict, cell_dir: Path, context_path: Path, labels: np.nda
     import spectrum_metrics
 
     try:
-        log("  building SBS96 counts")
+        n_clusters = int(labels.max()) + 1
+        log("  building SBS96 counts (cached index)")
         started = perf_counter()
-        counts = trinuc_counts_from_labels(context_path, labels)
-        sizes = (pl.DataFrame({"cluster_label": labels})
-                 .filter(pl.col("cluster_label") >= 0)
-                 .group_by("cluster_label").agg(pl.len().alias("cluster_size")))
-        trinuc = rvcp.annotate_trinuc_counts(counts, sizes)
+        counts = sbs96_counts(sbs96_index, labels, n_clusters)
+        present = np.nonzero(counts.sum(axis=0) > 0)[0]
+        cluster_columns = [f"cluster_{int(c)}" for c in present]
+        counts = counts[:, present]
         record["counts_seconds"] = round(perf_counter() - started, 1)
+        record["sbs96_total_mutations"] = int(counts.sum())
 
-        log(f"  SigProfiler on {sizes.height:,} clusters")
+        sigprof_root = cell_dir / (f"sigprofilerassignment_uv_only_"
+                                   f"{args.genome_build.lower()}_v{args.cosmic_version}")
+        input_dir = sigprof_root / "input"
+        output_sigprof = sigprof_root / "output"
+        input_dir.mkdir(parents=True, exist_ok=True)
+        output_sigprof.mkdir(parents=True, exist_ok=True)
+
+        matrix_path = input_dir / "cluster_sbs96_matrix.tsv"
+        matrix = {"Type": row_order}
+        for position, name in enumerate(cluster_columns):
+            matrix[name] = counts[:, position].tolist()
+        pl.DataFrame(matrix).write_csv(matrix_path, separator="\t")
+
+        log(f"  SigProfiler on {len(cluster_columns):,} clusters "
+            f"({int(counts.sum()):,} mutations)")
         started = perf_counter()
-        paths = rvcp.run_sigprofiler_assignment(
-            trinuc, cell_dir, args.genome_build, args.cosmic_version, args.sigprofiler_cpu)
+        rvcp.Analyzer.cosmic_fit(
+            samples=str(matrix_path), output=str(output_sigprof),
+            signature_database=str(signature_database),
+            genome_build=args.genome_build, cosmic_version=float(args.cosmic_version),
+            make_plots=False, collapse_to_SBS96=True, connected_sigs=False, verbose=False,
+            input_type="matrix", context_type="96", export_probabilities=True,
+            sample_reconstruction_plots=False, cpu=args.sigprofiler_cpu,
+            add_background_signatures=False,
+        )
         record["sigprofiler_seconds"] = round(perf_counter() - started, 1)
-        record["sigprofiler_paths"] = paths
+        record["sbs96_matrix"] = str(matrix_path)
 
-        stats_path = (Path(paths["output_dir"]) / "Assignment_Solution" / "Solution_Stats"
+        stats_path = (output_sigprof / "Assignment_Solution" / "Solution_Stats"
                       / "Assignment_Solution_Samples_Stats.txt")
         record["assignment"] = assignment_metrics.summarise(stats_path)
-        record["spectrum"] = spectrum_metrics.summarise(Path(paths["matrix_path"]))
+        record["spectrum"] = spectrum_metrics.summarise(matrix_path)
         log(f"    cosine mean {record['assignment']['cosine_mean']:.3f}, "
             f"L1% mean {record['assignment'].get('l1_pct_mean', float('nan')):.1f}, "
             f"top-channel median {record['spectrum']['top_channel_share_median']:.3f}")
@@ -314,6 +427,7 @@ def aggregate(output_dir: Path) -> pl.DataFrame:
         cell = payload["cell"]
         assignment = payload.get("assignment", {})
         spectrum = payload.get("spectrum", {})
+        geometry = payload.get("geometry", {})
         nan = float("nan")
         rows.append({
             "label": payload["label"],
@@ -327,6 +441,13 @@ def aggregate(output_dir: Path) -> pl.DataFrame:
             "top_chan": round(spectrum.get("top_channel_share_median", nan), 3),
             "tc>0.5": round(spectrum.get("frac_above_05", nan), 3),
             "tc>0.8": round(spectrum.get("frac_above_08", nan), 3),
+            # Geometry. Read connect_mean WITH n_clusters -- it rises monotonically as
+            # clusters merge, so a high value alone says nothing.
+            "dbcv": geometry.get("dbcv"),
+            "connect": round(geometry.get("connectivity_mean", nan), 3),
+            "prob_mean": round(geometry.get("prob_mean", nan), 3),
+            "prob>0.8": round(geometry.get("prob_frac_above_08", nan), 3),
+            "persist": round(geometry.get("persistence_mean", nan), 4),
             "cos_mean": round(assignment.get("cosine_mean", nan), 4),
             "cos_wmean": round(assignment.get("cosine_weighted_mean", nan), 4),
             "l1%_mean": round(assignment.get("l1_pct_mean", nan), 2),
@@ -354,6 +475,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--genome-build", default="GRCh38")
     parser.add_argument("--cosmic-version", default="3.5")
     parser.add_argument("--sigprofiler-cpu", type=int, default=16)
+    parser.add_argument("--build-index-only", action="store_true",
+                        help="build the SBS96 index cache and exit")
+
+    parser.add_argument("--skip-geometry", action="store_true",
+                        help="skip DBCV/connectivity/probability/persistence metrics")
+    parser.add_argument("--connectivity-rows", type=int, default=200_000)
+    parser.add_argument("--dbcv-rows", type=int, default=25_000)
+    parser.add_argument("--dbcv-max-clusters", type=int, default=500,
+                        help="above this, validity_index raises on sparsely-sampled clusters")
+
     parser.add_argument("--dry-run", action="store_true",
                         help="print the grid and its projected cost, run nothing")
     parser.add_argument("--aggregate", action="store_true",
@@ -395,6 +526,20 @@ def main() -> int:
         log(f"wrote {output_dir / 'sweep_ranking.csv'}")
         return 0
 
+    # The signature database also fixes the SBS96 row order, so it is built before the index.
+    sbs96_index = row_order = signature_database = None
+    if args.context or args.build_index_only:
+        import run_variant_cluster_pipeline as rvcp
+
+        signature_dir = output_dir / "signature_db"
+        signature_dir.mkdir(parents=True, exist_ok=True)
+        signature_database = signature_dir / f"uv_only_SBS_{args.genome_build}.tsv"
+        row_order = rvcp.write_uv_only_signature_database(
+            args.genome_build, args.cosmic_version, signature_database)
+        sbs96_index = load_or_build_index(args.context, row_order, output_dir)
+        if args.build_index_only:
+            return 0
+
     fit_sizes = [int(v) for v in args.fit_sizes.split(",") if v]
     grid = build_grid(
         fit_sizes=fit_sizes,
@@ -426,10 +571,14 @@ def main() -> int:
         raise SystemExit("--coords is required to run the sweep")
     coords = np.load(args.coords, mmap_mode="r")
     log(f"coords: {coords.shape[0]:,} x {coords.shape[1]}")
-    if args.context:
+    if sbs96_index is not None:
+        if sbs96_index.shape[0] != coords.shape[0]:
+            raise SystemExit(
+                f"SBS96 index has {sbs96_index.shape[0]:,} rows but coords has "
+                f"{coords.shape[0]:,} -- they must come from the same stage-1 run")
         log(f"scoring on: {args.context} (SigProfiler per cell)")
     else:
-        log("no --context: cells will be labelled and saved but NOT scored")
+        log("no --context: cells will be labelled and saved but NOT signature-scored")
 
     if args.gpu_budget_gb:
         try:
@@ -447,7 +596,8 @@ def main() -> int:
         log(f"[{position}/{len(pending)}] {cell.label()}")
         cell_dir = cells_dir / cell.label()
         try:
-            run_cell(cell, coords, cell_dir, args)
+            run_cell(cell, coords, cell_dir, args, sbs96_index=sbs96_index,
+                     row_order=row_order, signature_database=signature_database)
         except Exception as exc:  # noqa: BLE001 - a failed cell must not lose the sweep
             cell_dir.mkdir(parents=True, exist_ok=True)
             (cell_dir / "failed.json").write_text(json.dumps({

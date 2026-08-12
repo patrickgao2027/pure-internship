@@ -4,43 +4,63 @@ Companion to `hdbscan_param_sweep.py`.
 
 ---
 
-## What the sweep itself measures
+## What each cell writes
 
-Very little, on purpose. Each cell writes `cells/<label>/metrics.json` the moment it finishes:
+`cells/<label>/metrics.json`, the moment it finishes, plus `cohort_labels.npy` (int32,
+row-aligned with `coords.npy` — the actual product).
 
-| Metric | |
-|---|---|
-| `n_clusters_fit`, `fit_noise_fraction` | Shape of the fit, before any held-out rows |
-| `cohort_n_clusters`, `cohort_noise_fraction` | Shape of the full 157.5M labelling |
-| `held_mean_probability` | Mean membership probability of the held-out rows |
-| `fit_seconds`, `label_seconds` | Cost, so a marginal gain can be weighed against 3.25 h of fitting |
-| `cohort_labels.npy` | **The actual product.** int32, row-aligned with `coords.npy` |
+**Shape** — `n_clusters_fit`, `fit_noise_fraction`, `cohort_n_clusters`,
+`cohort_noise_fraction`, `fit_seconds`, `label_seconds`.
 
-Everything that needs the mutation contexts — the SBS96 count matrix, SigProfiler, per-cluster
-cosine, the size distribution — comes from `uv_vae/scripts/run_variant_cluster_pipeline.py`
-run against a saved `cohort_labels.npy`. That pipeline is what produced every earlier result
-in this repo; a second implementation inside the sweep would be a second answer to reconcile,
-not a shortcut. The relevant entry points are `annotate_trinuc_counts`,
-`write_cluster_sbs96_matrix`, `run_sigprofiler_assignment`, `query_cluster_stats` and
-`dominant_signature_columns`.
+**Geometry** (`cluster_quality.py`, on the fit set) — DBCV, connectivity, membership
+probabilities, cluster persistence. See the table below.
+
+**Spectrum** (`spectrum_metrics.py`, no signature reference) — top-channel share median and
+fractions above 0.5 / 0.8, distinct dominant channels, clusters per dominant channel,
+pairwise cosine / L1 / L2 between normalised cluster spectra.
+
+**Signatures** (`assignment_metrics.py`, aggregating SigProfiler's own output) — cosine mean
+/ median / mutation-weighted, `L1_Norm_%`, `L2_Norm_%`, `l2_over_total_pct`, KL, correlation,
+and cluster + mutation shares above cosine 0.7 / 0.8.
+
+**No ranking rule is applied.** The sweep emits numbers side by side and stops there.
+
+The SBS96 canonicalisation is imported from `stage3_apply_full.sbs96_expr`, itself documented
+and tested as identical to `run_variant_cluster_pipeline.annotate_trinuc_counts`. SigProfiler
+is `rvcp.Analyzer.cosmic_fit` — the same CPU call every other stage in this repo makes.
+**There is no GPU SigProfiler and it would not help:** `cosmic_fit` only ever sees a
+96 × n_clusters matrix (~110k numbers at 1,150 clusters). What is expensive is *building*
+that matrix from 157.5M rows, which is why the context is collapsed to one `int8` per row
+**once** (157 MB, cached as `sbs96_index.npy`) and each cell's matrix is then a `bincount`.
+
+```bash
+BUILD_INDEX_ONLY=1 bash umap_hdbscan_sweep/tmux_param_sweep.sh
+```
+
+## Geometry metrics, and what each one hides
+
+| Metric | Reads as | The caveat that must travel with it |
+|---|---|---|
+| `dbcv` | Density separation, −1…1 | Scored on a **25k subsample**, and declined above 500 clusters. HDBSCAN's own `relative_validity_` is a cheaper MST approximation, **not** true DBCV. |
+| `connectivity_mean` | Fraction of each point's k-NN sharing its label | **Monotone in cluster count** — merge everything into one cluster and it is exactly 1.0. Meaningless without `n_clusters`. |
+| `prob_mean`, `prob_frac_above_*` | Membership strength | `probabilities_` is renormalised *per cluster* (λ_p / λ_max), so many small tight clusters inflate the mean. The threshold fractions are the honest summary. |
+| `persistence_*` | HDBSCAN's own stability | Partly circular under `eom` — the sum is what EOM maximises. Independent evidence only under `leaf`. |
+
+**CDbw is deliberately absent.** No maintained, validated Python implementation exists, it
+needs multiple representatives per cluster (O(n²)-ish), and it would land as a third
+subsample-based density score beside DBCV without asking an independent question.
+
+**The caveat above all of these:** DBCV, connectivity, persistence and the excluded
+silhouette family all measure geometry *in the embedding*. The 2026-08-04 UMAP cells separate
+cleanly by every density criterion and are still 87 % single-trinucleotide-context — they
+score well *because* UMAP manufactured the separation the metric then rewards. Read them
+beside `top_channel_share`, never instead of it.
 
 ---
 
-## The ranking rule, fixed in advance
+## Reading the numbers
 
-From `HDBSCAN_SWEEP_PLAN.md` Phase 1. It is applied **after** the pipeline has produced
-cluster sizes and cosines for the finished cells, not inside the sweep:
-
-> Choose the **smallest** `min_cluster_size` such that
-> 1. the p10 cluster clears **3,000** full-cohort mutations,
-> 2. the p90 cluster stays under **300,000**, and
-> 3. noise is within **10 points** of the lowest-noise cell.
->
-> Tie-break on **mutation share in clusters with cosine > 0.7**.
-
-Smallest, not largest. That follows from Finding 1: aggregate signature quality does not move
-across a 25× `mcs` range. If coarsening buys no accuracy, resolution is free and `mcs` only
-has to buy the floor.
+There is no ranking rule and no combined score. Two facts inform how to read them:
 
 **Sizes must be measured, never derived.** Finding 3: at `mcs=100` a 31.5× scale factor
 predicts a 3,150-mutation floor and the smallest cluster actually held **174**. Held-out rows

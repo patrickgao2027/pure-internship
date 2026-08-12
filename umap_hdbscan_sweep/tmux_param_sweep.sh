@@ -7,6 +7,7 @@
 #
 #   bash umap_hdbscan_sweep/tmux_param_sweep.sh                 # run it
 #   DRY_RUN=1 bash umap_hdbscan_sweep/tmux_param_sweep.sh       # grid + projected cost only
+#   BUILD_INDEX_ONLY=1 bash umap_hdbscan_sweep/tmux_param_sweep.sh   # one-off SBS96 cache
 #   AGGREGATE=1 bash umap_hdbscan_sweep/tmux_param_sweep.sh     # summarise what has finished
 #
 # Env overrides:
@@ -47,6 +48,11 @@ mkdir -p "$OUTPUT_DIR"
 
 if [[ "${AGGREGATE:-0}" == "1" ]]; then
     exec python "$SCRIPT" --aggregate --output-dir "$OUTPUT_DIR"
+fi
+
+if [[ "${BUILD_INDEX_ONLY:-0}" == "1" ]]; then
+    exec python "$SCRIPT" --build-index-only --context "$CONTEXT" \
+        --output-dir "$OUTPUT_DIR" --genome-build GRCh38 --cosmic-version 3.5
 fi
 
 EXTRA=()

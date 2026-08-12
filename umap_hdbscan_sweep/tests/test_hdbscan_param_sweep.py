@@ -24,8 +24,10 @@ sys.path.insert(0, str(REPO_ROOT / "uv_vae" / "scripts"))
 from hdbscan_param_sweep import (  # noqa: E402
     Cell,
     build_grid,
+    build_sbs96_index,
+    load_or_build_index,
     projected_fit_seconds,
-    trinuc_counts_from_labels,
+    sbs96_counts,
 )
 
 
@@ -77,7 +79,7 @@ def test_default_cell_selection_method():
     assert Cell(1, 2, 3).cluster_selection_method == "eom"
 
 
-# ── the hand-off to run_variant_cluster_pipeline ───────────────────────────────
+# ── the SBS96 counting path ────────────────────────────────────────────────────
 
 def write_context(path, rows):
     pl.DataFrame({
@@ -87,48 +89,92 @@ def write_context(path, rows):
     return path
 
 
-def test_trinuc_counts_drop_noise_and_aggregate_duplicates(tmp_path):
-    """Noise rows must not become a cluster, and identical contexts within a cluster must
-    collapse to one counted row -- that is the shape rvcp.annotate_trinuc_counts expects."""
-    context = write_context(tmp_path / "c.parquet", [
-        ("C", "T", "A", "G"), ("C", "T", "A", "G"), ("C", "T", "A", "G"),
-        ("T", "A", "G", "C"),
-        ("C", "T", "A", "G"),
-    ])
-    labels = np.array([0, 0, 0, 1, -1], dtype=np.int32)
-
-    counts = trinuc_counts_from_labels(context, labels)
-
-    assert set(counts["cluster_label"].to_list()) == {0, 1}
-    row = counts.filter(pl.col("cluster_label") == 0)
-    assert row.height == 1 and row["count"][0] == 3
-    assert counts["count"].sum() == 4   # the noise row is gone
+CHANNELS = [f"{p}[{r}>{a}]{n}"
+            for r, alts in (("C", "AGT"), ("T", "ACG"))
+            for a in alts for p in "ACGT" for n in "ACGT"]
 
 
-def test_trinuc_counts_refuse_a_length_mismatch(tmp_path):
-    context = write_context(tmp_path / "c.parquet", [("C", "T", "A", "G")] * 3)
-    with pytest.raises(SystemExit, match="must come from the same stage-1 run"):
-        trinuc_counts_from_labels(context, np.zeros(5, dtype=np.int32))
+def test_sbs96_counts_scatter_matches_a_loop():
+    """bincount on a flattened (channel, cluster) index replaces np.add.at, which is
+    unbuffered and runs at ~1M updates/sec. Same arithmetic, so it must match exactly."""
+    rng = np.random.default_rng(0)
+    index = rng.integers(-1, 96, size=5000).astype(np.int8)
+    labels = rng.integers(-1, 7, size=5000).astype(np.int32)
+
+    counts = sbs96_counts(index, labels, 7)
+
+    expected = np.zeros((96, 7), dtype=np.int64)
+    for channel, cluster in zip(index, labels):
+        if channel >= 0 and 0 <= cluster < 7:
+            expected[channel, cluster] += 1
+    np.testing.assert_array_equal(counts, expected)
+    # Noise rows and contextless rows are dropped, never folded into cluster 0.
+    assert counts.sum() == int(((index >= 0) & (labels >= 0)).sum())
 
 
-def test_counts_feed_rvcp_annotate_unchanged(tmp_path):
-    """End to end into the REAL run_variant_cluster_pipeline.annotate_trinuc_counts.
+def test_sbs96_counts_are_chunk_invariant():
+    """The chunking exists only to bound scratch memory; a chunk boundary must not move a
+    single count."""
+    rng = np.random.default_rng(4)
+    index = rng.integers(-1, 96, size=3000).astype(np.int8)
+    labels = rng.integers(-1, 5, size=3000).astype(np.int32)
 
-    The point of routing through rvcp is that the SBS96 canonicalisation stays the single
-    implementation every earlier result in this repo used. If the column names this produces
-    ever drift from what rvcp reads, this fails instead of silently emitting nulls.
+    whole = sbs96_counts(index, labels, 5, chunk_rows=10**9)
+    for chunk in (1, 7, 999, 3000, 3001):
+        np.testing.assert_array_equal(sbs96_counts(index, labels, 5, chunk_rows=chunk), whole)
+
+
+def test_index_build_uses_the_repos_own_canonicalisation(tmp_path):
+    """The int8 index must agree with stage3_apply_full.sbs96_expr, which is itself
+    documented as identical to rvcp.annotate_trinuc_counts. Building a third
+    canonicalisation is exactly what this cache must not become.
+
+    A[C>T]G is already pyrimidine and passes through; T[A>G]C has a purine reference and
+    must come back G[T>C]A -- complemented AND with the flanks swapped. Getting the swap
+    wrong yields A[T>C]G, a real channel, so the counts would stay plausible while landing
+    in the mirror-image context.
     """
+    context = write_context(tmp_path / "c.parquet", [
+        ("C", "T", "A", "G"),      # -> A[C>T]G
+        ("A", "G", "T", "C"),      # -> G[T>C]A
+        ("C", "C", "A", "G"),      # not a substitution -> -1
+    ])
+    index = build_sbs96_index(context, CHANNELS, tmp_path / "idx.npy")
+
+    assert CHANNELS[index[0]] == "A[C>T]G"
+    assert CHANNELS[index[1]] == "G[T>C]A"
+    assert index[2] == -1
+    assert (tmp_path / "idx.npy").exists()
+
+
+def test_index_cache_is_reused_rather_than_rebuilt(tmp_path):
+    context = write_context(tmp_path / "c.parquet", [("C", "T", "A", "G")] * 4)
+    first = load_or_build_index(context, CHANNELS, tmp_path)
+    # Deleting the source proves the second call read the cache and did not re-scan.
+    context.unlink()
+    second = load_or_build_index(context, CHANNELS, tmp_path)
+    np.testing.assert_array_equal(np.asarray(first), np.asarray(second))
+
+
+def test_index_matches_rvcp_annotate_on_the_same_rows(tmp_path):
+    """End to end against the REAL run_variant_cluster_pipeline, so a drift between the
+    cached index and the pipeline's own SBS96 labels fails here rather than silently
+    producing a differently-canonicalised matrix."""
     rvcp = pytest.importorskip("run_variant_cluster_pipeline")
 
-    context = write_context(tmp_path / "c.parquet", [
-        ("C", "T", "A", "G"),          # already pyrimidine -> A[C>T]G
-        ("A", "G", "T", "C"),          # purine -> reverse complement -> G[T>C]A
-    ])
-    labels = np.array([0, 0], dtype=np.int32)
+    rows = [("C", "T", "A", "G"), ("A", "G", "T", "C"), ("G", "T", "A", "A"),
+            ("T", "A", "G", "C")]
+    context = write_context(tmp_path / "c.parquet", rows)
+    index = build_sbs96_index(context, CHANNELS, tmp_path / "idx.npy")
 
-    counts = trinuc_counts_from_labels(context, labels)
-    sizes = pl.DataFrame({"cluster_label": [0], "cluster_size": [2]})
-    annotated = rvcp.annotate_trinuc_counts(counts, sizes)
+    counts = pl.DataFrame({
+        "cluster_label": [0] * len(rows),
+        "REF": [r[0] for r in rows], "ALT": [r[1] for r in rows],
+        "X_PREV1": [r[2] for r in rows], "X_NEXT1": [r[3] for r in rows],
+        "count": [1] * len(rows),
+    })
+    annotated = rvcp.annotate_trinuc_counts(
+        counts, pl.DataFrame({"cluster_label": [0], "cluster_size": [len(rows)]}))
 
-    assert "sbs96" in annotated.columns
-    assert set(annotated["sbs96"].to_list()) == {"A[C>T]G", "G[T>C]A"}
+    for position, expected in enumerate(annotated["sbs96"].to_list()):
+        assert CHANNELS[index[position]] == expected
