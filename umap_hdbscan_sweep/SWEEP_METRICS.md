@@ -1,14 +1,35 @@
-# What the sweep measures, and how a cell wins
+# What the sweep produces, and what scores it
 
-Companion to `hdbscan_param_sweep.py`. Every number below is written to
-`cells/<label>/metrics.json` the moment a cell finishes.
+Companion to `hdbscan_param_sweep.py`.
+
+---
+
+## What the sweep itself measures
+
+Very little, on purpose. Each cell writes `cells/<label>/metrics.json` the moment it finishes:
+
+| Metric | |
+|---|---|
+| `n_clusters_fit`, `fit_noise_fraction` | Shape of the fit, before any held-out rows |
+| `cohort_n_clusters`, `cohort_noise_fraction` | Shape of the full 157.5M labelling |
+| `held_mean_probability` | Mean membership probability of the held-out rows |
+| `fit_seconds`, `label_seconds` | Cost, so a marginal gain can be weighed against 3.25 h of fitting |
+| `cohort_labels.npy` | **The actual product.** int32, row-aligned with `coords.npy` |
+
+Everything that needs the mutation contexts — the SBS96 count matrix, SigProfiler, per-cluster
+cosine, the size distribution — comes from `uv_vae/scripts/run_variant_cluster_pipeline.py`
+run against a saved `cohort_labels.npy`. That pipeline is what produced every earlier result
+in this repo; a second implementation inside the sweep would be a second answer to reconcile,
+not a shortcut. The relevant entry points are `annotate_trinuc_counts`,
+`write_cluster_sbs96_matrix`, `run_sigprofiler_assignment`, `query_cluster_stats` and
+`dominant_signature_columns`.
 
 ---
 
 ## The ranking rule, fixed in advance
 
-From `HDBSCAN_SWEEP_PLAN.md` Phase 1, restated here because the code implements it literally
-(`aggregate()`):
+From `HDBSCAN_SWEEP_PLAN.md` Phase 1. It is applied **after** the pipeline has produced
+cluster sizes and cosines for the finished cells, not inside the sweep:
 
 > Choose the **smallest** `min_cluster_size` such that
 > 1. the p10 cluster clears **3,000** full-cohort mutations,
@@ -17,77 +38,35 @@ From `HDBSCAN_SWEEP_PLAN.md` Phase 1, restated here because the code implements 
 >
 > Tie-break on **mutation share in clusters with cosine > 0.7**.
 
-Smallest, not largest. That is not a preference — it follows from Finding 1 (below), which
-measured that aggregate signature quality does not move across a 25× `mcs` range. If
-coarsening buys no accuracy, resolution is free, and `mcs` only has to buy the floor.
+Smallest, not largest. That follows from Finding 1: aggregate signature quality does not move
+across a 25× `mcs` range. If coarsening buys no accuracy, resolution is free and `mcs` only
+has to buy the floor.
 
-`aggregate()` emits `eligible` as a boolean column so cells that fail a criterion are still
-visible with their numbers rather than being dropped.
+**Sizes must be measured, never derived.** Finding 3: at `mcs=100` a 31.5× scale factor
+predicts a 3,150-mutation floor and the smallest cluster actually held **174**. Held-out rows
+near cluster boundaries go to noise, so small fit-set clusters attract disproportionately few
+of them and shrink.
 
----
-
-## Tier A — cluster geometry (no signatures involved)
-
-Computed over the **full 157.5M-locus labelling**, never the fit set.
-
-| Metric | Why it is here |
-|---|---|
-| `n_clusters`, `noise_fraction` | Baseline shape. Neither is an objective on its own. |
-| `min / p10 / median / p90 / max` | The decision variables. Cluster **size in cohort mutations**. |
-| `mutation_share_in_band` | Share of assigned mutations in clusters sized 3k–300k — the band that fits well. |
-| `clusters_below_floor`, `clusters_above_ceiling` | Where a failing cell is failing. |
-| `size_entropy_normalised` | Balance, 0–1. One giant cluster plus a tail scores far below an even split at the same count — cluster count alone hides that. |
-| `cohort_read_weighted.*` | Same statistics weighted by `locus_reads`, i.e. what the answer looks like if every read votes instead of every locus. |
-
-**Sizes are measured, never derived.** `HDBSCAN_SWEEP_PLAN.md` Finding 3: at `mcs=100` a
-31.5× scale factor predicts a 3,150-mutation floor and the smallest cluster actually held
-**174**. Held-out rows near cluster boundaries go to noise, so small fit-set clusters attract
-disproportionately few of them and shrink. Any metric computed on the fit set and scaled up
-is wrong.
-
-## Tier B — SigProfiler (the actual objective)
-
-| Metric | Why it is here |
-|---|---|
-| `mutation_share_above_07` / `_08` | **The headline.** Share of cohort mutations in confidently-fit clusters. |
-| `clusters_above_07` / `_08` | Reported, but not ranked on — see below. |
-| `cosine_median`, `_mean`, `_p10`, `_p90` | Distribution shape. It is bimodal, so the median alone misleads. |
-| `cosine_mutation_weighted_mean` | Cohort-level quality. Stops a long tail of tiny well-fit clusters from flattering a cell. |
-| `signatures_used`, `signatures` | How much of the reference the clustering actually exercises. |
-| `n_sbs7_subtypes_separated` | Do SBS7A/B/C/D dominate **different** clusters? Evidence the clustering resolves UV biology instead of smearing it. |
-| `sbs38_present`, `sbs38_dominates_a_cluster` | SBS38 is the fifth member of the `uv_only` database and not an SBS7 subtype, so it is reported separately — the plan asks whether it *still appears*. |
-
-**Signature names carry two spellings.** COSMIC ships `SBS7a`; `write_uv_only_signature_database`
-renames to `SBS7A`. So `--signature-set full` yields lowercase Activities columns and
-`uv_only` yields uppercase ones. All matching is done upper-cased, because matching one
-spelling reports **zero** UV signatures under the other configuration — as a number, not an
-error, so it reads as a clustering result rather than a string mismatch.
-
-**Why mutation share and not cluster count.** Finding 1 measured, across `mcs` 100 → 2500:
+**Mutation share, not cluster count.** Finding 1 measured, across `mcs` 100 → 2500:
 
 | mcs | clusters | clusters cos>0.7 | **muts in cos>0.7** |
 |---|---|---|---|
 | 100 | 5,709 | 544 | **10.7 %** |
 | 2500 | 613 | 68 | **10.2 %** |
 
-Counting clusters says these cells differ 8-fold. Counting mutations says they are the same
-cell packaged differently — which is the truth. Spearman correlation between cluster size and
+Counting clusters says these differ 8-fold. Counting mutations says they are the same cell
+packaged differently — which is the truth. Spearman correlation between cluster size and
 cosine, pooled across all five cells, was **0.073**.
 
-## Tier C — stability
+---
 
-Not computed inside the sweep; run separately on the saved `cohort_labels.npy`:
+## Stability, run separately on the saved labels
 
 - **Seed ARI** — refit at seed 43, ARI between the two labellings of the same rows. The
   baseline to beat is **0.261** (model 13, from the final_models README).
 - **Cross-size ARI + Meilă VI** — `cross_size_ari.py`. Distinguishes *a larger fit set found
   new structure* from *a larger fit set merged what the smaller one already had*.
   `H(coarse|fine) = 0` is an exact identity for a clean coarsening, not a threshold.
-
-## Tier D — cost
-
-`fit_seconds`, `label_seconds`, `sigprofiler_seconds`. Reported so a marginal quality gain
-can be weighed against 3.25 h of fitting, not to rank cells.
 
 ---
 
@@ -97,9 +76,8 @@ can be weighed against 3.25 h of fitting, not to rank cells.
   clusters. HDBSCAN on a UMAP embedding produces neither, and they would rank a wrong answer
   above a right one.
 - **DBCV.** Density-aware and the right family, but `LIMITATIONS.md` caps it at a 25k-row
-  sample and skips cells above 500 clusters — most of this grid. It is a ranking score on a
-  subsample, not a cohort measurement. Available via `rescore_dbcv.py` if wanted for the
-  finalists.
+  sample and skips cells above 500 clusters — most of this grid. Available via
+  `rescore_dbcv.py` if wanted for the finalists.
 - **Cluster count as a target.** Seed-sensitive by ±5 % at 25M fit rows (final_models caveat
   1). A count difference between two cells is not by itself a real effect.
 
@@ -107,20 +85,19 @@ can be weighed against 3.25 h of fitting, not to rank cells.
 
 ## Two things to settle before trusting any of it
 
-**1. `uv_only` versus full COSMIC — this decides what the sweep optimises.**
+**1. `uv_only` versus full COSMIC — this decides what is being optimised.**
 Median cosine was **0.296 at every single `mcs`** in the earlier sweep, and the distribution
 is bimodal. The row filter (`st='MIXED' AND et='MIXED' AND FILT=1`) admits non-UV variants,
 but assignment used the restricted `uv_only` set. If most reads are not UV, no UV-only
-reference can fit them and no HDBSCAN parameter will change that — the sweep would be
-optimising a quantity that is capped by the reference, not by the clustering.
+reference can fit them and no HDBSCAN parameter will change that.
 
-`--signature-set full` runs the same cell against all of COSMIC. It costs seconds on a matrix
-that already exists. Run it on one finished cell before committing GPU-days:
+Re-running the pipeline against all of COSMIC costs seconds on a matrix that already exists.
+Do it on one finished cell before committing GPU-days:
 
-- Low-cosine clusters fit *other* signatures → they are real non-UV structure, and the
-  objective becomes "maximise clusters above threshold across the full reference".
-- They still fit nothing → they are unstructured reads, and the objective is "maximise
-  mutation share in well-fit clusters while keeping noise low".
+- Low-cosine clusters fit *other* signatures → real non-UV structure, and the objective
+  becomes "maximise clusters above threshold across the full reference".
+- They still fit nothing → unstructured reads, and the objective is "maximise mutation share
+  in well-fit clusters while keeping noise low".
 
 **2. The RBC labelling is not bit-identical to `approximate_predict`.** Measured on the 2M
 eval probe against the 25M model: **97.67 %** exact agreement. The disagreement is almost
