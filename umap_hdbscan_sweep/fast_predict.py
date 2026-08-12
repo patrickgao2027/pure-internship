@@ -133,8 +133,13 @@ def build_tables(clusterer, n_fit: int, min_samples: int | None = None) -> Predi
     lambda_of[children[is_cluster_row]] = lambdas[is_cluster_row]
 
     # Each cluster's own max lambda = the largest lambda_val among rows having it as parent.
+    # Coincident points give lambda = 1/0 = inf, and a single such pair would otherwise set a
+    # whole cluster's max lambda to inf, making prob = lambda/inf = 0 for every point in it.
+    # Clamp to the largest finite lambda, which is the scale the probabilities are meant to be
+    # normalised against.
+    finite_only = np.where(np.isfinite(lambdas), lambdas, 0.0)
     own_max_lambda = np.zeros(max_cluster, dtype=np.float64)
-    np.maximum.at(own_max_lambda, parents, lambdas)
+    np.maximum.at(own_max_lambda, parents, finite_only)
 
     cluster_label = _cluster_labels(clusterer, raw_tree, max_cluster, parent_of,
                                     is_cluster_row, parents, children)
@@ -169,7 +174,14 @@ def build_tables(clusterer, n_fit: int, min_samples: int | None = None) -> Predi
     # The principled bound: a cluster's max lambda is a lambda_val drawn from the condensed
     # tree, so it cannot exceed the largest lambda_val in that tree. Anything above it is a
     # sentinel or corruption, whatever its magnitude.
-    tree_max_lambda = float(lambdas.max()) if lambdas.size else np.inf
+    # The bound must come from the FINITE lambdas only. lambda = 1/distance, so any pair of
+    # coincident points puts an `inf` in the tree -- and in a 25M-row 2-D UMAP embedding
+    # duplicate coordinates are a certainty, not an edge case. Taking a raw `lambdas.max()`
+    # there yields inf, `values <= inf` is vacuously true, and the sentinel check silently
+    # passes on exactly the model it exists to catch (observed on the 25M cuML model: every
+    # mapped cluster FLT_MAX, source still reported as the model dict).
+    finite_lambdas = lambdas[np.isfinite(lambdas)]
+    tree_max_lambda = float(finite_lambdas.max()) if finite_lambdas.size else np.inf
     mapped = cluster_label >= 0
     if mapped.any():
         values = max_lambda[mapped]

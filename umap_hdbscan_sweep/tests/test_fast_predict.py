@@ -183,14 +183,68 @@ def test_falls_back_when_model_max_lambdas_are_sentinels():
     assert probabilities.mean() > 0.01, "sentinel max_lambda would crush probabilities to ~0"
 
 
-class _SentinelMaxLambdas:
-    """Real prediction data except max_lambdas, which is every-key-is-FLT_MAX."""
+def test_sentinel_rejected_even_when_the_tree_holds_an_infinite_lambda():
+    """The regression from the 25M cuML model.
 
-    def __init__(self, clusterer, sentinel):
+    The sentinel guard bounds max_lambda by the largest lambda_val in the condensed tree, on
+    the reasoning that a max lambda IS one of those values. But lambda = 1/distance, and cuML
+    computes it in float32, so coincident points -- a certainty in a 25M-row 2-D embedding --
+    put `inf` in the tree. The bound becomes `values <= inf`, nothing fails it, and a model
+    whose every mapped cluster was FLT_MAX sailed through: labels correct, probability mean
+    0.0076 against cuML's 0.9160. CPU hdbscan clips those lambdas to finite, which is why no
+    naturally-fitted model reproduces it -- the inf has to be injected to get the cuML shape.
+
+    A non-finite lambda also poisons the reconstruction path, since own_max_lambda takes a
+    per-cluster maximum: one inf sets a whole cluster's scale to inf and every probability in
+    it to lambda/inf = 0. Both paths have to survive it, so this asserts on probabilities and
+    not merely on which source was chosen.
+    """
+    fit = make_blobs(5000, seed=14)
+    query = make_blobs(1500, seed=15)
+
+    clusterer = hdbscan.HDBSCAN(min_cluster_size=50, min_samples=5,
+                                cluster_selection_method="eom", prediction_data=True)
+    clusterer.fit(fit)
+    reference_labels, reference_probabilities = hdbscan.approximate_predict(clusterer, query)
+
+    poisoned = _SentinelMaxLambdas(clusterer, sentinel=np.finfo(np.float32).max,
+                                   inject_infinite_lambda=True)
+    assert not np.isfinite(poisoned.condensed_tree_._raw_tree["lambda_val"]).all()
+
+    tables = build_tables(poisoned, n_fit=fit.shape[0])
+    assert "reconstructed" in tables.max_lambda_source, (
+        f"FLT_MAX slipped through when the tree held an inf: {tables.max_lambda_source}")
+    assert np.isfinite(tables.max_lambda).all(), "an inf lambda leaked into the max_lambda table"
+
+    labels, probabilities = predict(tables, fit, query, backend="sklearn")
+    assert probabilities.mean() > 0.5, (
+        f"probabilities crushed to {probabilities.mean():.4f} -- the miletus symptom")
+
+    # The injected inf sits on one leaf row, so the labelling is unchanged for everything that
+    # does not descend through it.
+    agreement = float((labels == reference_labels).mean())
+    assert agreement > 0.99, f"only {agreement:.4%} of labels survived the injected inf"
+
+
+class _SentinelMaxLambdas:
+    """Real prediction data except max_lambdas, which is every-key-is-FLT_MAX.
+
+    With `inject_infinite_lambda` the condensed tree also gets one non-finite lambda_val, the
+    way cuML's float32 `1/0` does on coincident points. CPU hdbscan never emits one, so it has
+    to be planted to reproduce the model that actually defeated the guard.
+    """
+
+    def __init__(self, clusterer, sentinel, inject_infinite_lambda=False):
         self.condensed_tree_ = clusterer.condensed_tree_
         self.labels_ = clusterer.labels_
         self.min_samples = clusterer.min_samples
         self.min_cluster_size = clusterer.min_cluster_size
+
+        if inject_infinite_lambda:
+            raw = clusterer.condensed_tree_._raw_tree.copy()
+            leaf = np.nonzero(raw["child_size"] == 1)[0][0]
+            raw["lambda_val"][leaf] = np.inf
+            self.condensed_tree_ = type("_CT", (), {"_raw_tree": raw})()
 
         real = clusterer.prediction_data_
         self.prediction_data_ = type("_PD", (), {
