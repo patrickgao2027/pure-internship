@@ -41,10 +41,93 @@ BUILD_INDEX_ONLY=1 bash umap_hdbscan_sweep/tmux_param_sweep.sh
 
 | Metric | Reads as | The caveat that must travel with it |
 |---|---|---|
-| `dbcv` | Density separation, −1…1 | Scored on a **25k subsample**, and declined above 500 clusters. HDBSCAN's own `relative_validity_` is a cheaper MST approximation, **not** true DBCV. |
+| `dbcv` | Density separation, −1…1 | Scored on a **25k subsample**, now **stratified** so there is no cluster-count ceiling — see below. HDBSCAN's own `relative_validity_` is a cheaper MST approximation, **not** true DBCV. DBCV validates an EXISTING label array — it is not a clustering algorithm — so it always runs on `clusterer.labels_` from the HDBSCAN fit; there is no unlabelled variant. |
 | `connectivity_mean` | Fraction of each point's k-NN sharing its label | **Monotone in cluster count** — merge everything into one cluster and it is exactly 1.0. Meaningless without `n_clusters`. |
 | `prob_mean`, `prob_frac_above_*` | Membership strength | `probabilities_` is renormalised *per cluster* (λ_p / λ_max), so many small tight clusters inflate the mean. The threshold fractions are the honest summary. |
 | `persistence_*` | HDBSCAN's own stability | Partly circular under `eom` — the sum is what EOM maximises. Independent evidence only under `leaf`. |
+
+### Why DBCV no longer refuses above 500 clusters
+
+The old ceiling was a sampling artefact, not a property of DBCV. Uniform sampling draws from
+a cluster in proportion to its size, so at 1,330 clusters the small ones arrived under
+`MIN_SAMPLED_POINTS_PER_CLUSTER = 4` and `validity_index` dropped or raised on them. The
+2026-08-12 sweep scored only **11 of 28 cells** for this reason, excluding both extremes.
+
+`cluster_quality.stratified_sample` spends the *same total budget* with an equal-share
+allocation (water-filling, so a cluster smaller than its quota returns the surplus to the
+rest). Measured on 600 clusters over 25k rows: **stratified 63.7 s / 600 clusters scored,
+uniform 72.0 s / 593 scored** — no extra cost, because runtime is driven by the total point
+count, which is held fixed.
+
+One correction comes with it. DBCV's aggregate is `Σᵢ (|Cᵢ|/n)·Vᵢ`, weighted by cluster size,
+and `validity_index` takes those weights from the **sample** — which stratification
+deliberately distorts. So the per-cluster scores are pulled out and reweighted by the **true**
+cluster sizes. `dbcv` is that corrected figure and stays comparable to the uniform numbers
+already recorded (they agree to 0.005 on a clustering where both work);
+`dbcv_sample_weighted` is what `validity_index` returned.
+
+The per-cluster scores also give resolution no aggregate can: `dbcv_frac_clusters_negative`
+and **`dbcv_point_share_negative`** say how much of the data sits in clusters that are not
+density-separated at all. Read the point share — a hundred bad micro-clusters matter less
+than one bad cluster holding a third of the cohort.
+
+### Why DBCV is sampled at all — the memory wall, not just the time cost
+
+DBCV's intracluster step computes the all-points-core-distance, which materialises an
+**n_i × n_i distance matrix for every cluster**. So the binding constraint is the size of the
+LARGEST single cluster, not the total row count. k-DBCV states the formula it refuses on:
+
+```
+predicted_GB = ((max_cluster_size ** 2) * 8) / 1024**3 * 8
+```
+
+At its 25 GB default that caps the largest scoreable cluster at 20,480 points.
+`hdbscan.validity_index` builds the same matrix, so the same wall applies to it too — this is
+not a k-DBCV-specific limit.
+
+Applying the real cluster-size distribution from `fit1000000_mcs2500_ms5_eom` (largest
+cluster = 3.39% of assigned points) to full DBCV on each cell's WHOLE fit set:
+
+| fit rows | largest cluster | RAM for that one cluster | |
+|---|---|---|---|
+| 500,000 | 16,946 | 17 GB | OK, barely |
+| 1,000,000 | 33,891 | **68 GB** | refused |
+| 5,000,000 | 169,456 | **1,712 GB** | refused |
+| 25,000,000 | 847,282 | **42,789 GB** | refused |
+
+Full-fit-set DBCV is impossible from 1M fit rows upward on memory alone, before the O(k²)
+cluster-pair time cost is even considered. (This is the *fit set* — the 157.5M-row cohort was
+never a candidate.)
+
+**This is why stratified `per_cluster` capping is the right fix, not uniform sampling.**
+Memory is quadratic in `max_cluster_size`, so that is the variable worth controlling directly
+— `per_cluster=N` caps it absolutely regardless of how skewed the clustering is:
+
+| points/cluster | RAM for the largest cluster |
+|---|---|
+| 400 (the default) | 0.0095 GB |
+| 5,000 | 1.49 GB |
+| 20,000 | 23.8 GB |
+
+Uniform sampling can't do this cleanly, because it preserves every cluster's *share* — the
+largest cluster stays proportionally largest and only shrinks with the total budget. Getting
+it under the wall by shrinking the total budget alone pushes small clusters below the 4-point
+floor and they get dropped — precisely the failure that left 17 of 28 cells unscored under
+the old uniform ceiling.
+
+`cluster_quality.score_kdbcv` predicts this same quantity before calling `DBCV_score` and
+refuses with a stated reason (`dbcv_note`) rather than trusting the return value: k-DBCV
+signals *all-noise*, *fewer than two clusters*, **and** *memory cutoff exceeded* all with the
+same `-1` sentinel, which is also a legal DBCV score for a bad clustering. Silently accepting
+that `-1` as a real score would have recorded some memory-refused cells as "worst possible
+clustering" instead of "not scored."
+
+**Comparability is the other reason to sample, even where full DBCV would technically fit**
+(the 500k cells, at 17 GB). A full-data score and a sampled score are not the same
+estimator — sampled DBCV runs optimistic (see the accuracy measurement above). Scoring small
+cells in full and large cells by sample would make their scores incomparable, which defeats
+the purpose of a sweep. Every cell is scored at the same `per_cluster` resolution so the
+numbers can be read against each other.
 
 **CDbw is deliberately absent.** No maintained, validated Python implementation exists, it
 needs multiple representatives per cluster (O(n²)-ish), and it would land as a third
@@ -100,13 +183,50 @@ cosine, pooled across all five cells, was **0.073**.
 
 ---
 
-## Stability, run separately on the saved labels
+## Stability — the metric family that is not circular
 
-- **Seed ARI** — refit at seed 43, ARI between the two labellings of the same rows. The
-  baseline to beat is **0.261** (model 13, from the final_models README).
-- **Cross-size ARI + Meilă VI** — `cross_size_ari.py`. Distinguishes *a larger fit set found
-  new structure* from *a larger fit set merged what the smaller one already had*.
-  `H(coarse|fine) = 0` is an exact identity for a clean coarsening, not a threshold.
+Every index in the geometry table asks whether clusters are compact and separated **in the
+UMAP embedding**, and manufacturing compact, separated neighbourhoods is UMAP's objective.
+That is why connectivity sat at 0.998–1.000 across a 15× change in cluster count: it is not
+broken, it is answering a question the embedding already guaranteed. Stability asks whether
+the structure is *reproducible*, assumes nothing about cluster shape, and for this project is
+the thesis question rather than a diagnostic for it.
+
+`stability_sweep.py` runs it: reserve a probe, refit each cell on independent subsamples
+drawn from the remaining rows, label the probe with each, compare pairwise. The probe is held
+out of **every** fit set, so no replicate grades its own training rows.
+
+- **Per-cluster Jaccard** (Hennig 2007) — the one to lead with. For each cluster, the best
+  match in the other replicate: **≥0.75 stable, <0.5 dissolved**. Reported by cluster count
+  *and* by point share, because a hundred unstable micro-clusters and one unstable cluster
+  holding a third of the data give the same ARI and very different point shares.
+- **ARI**, with and without noise rows. Baseline to beat: **0.261** (model 13, final_models).
+- **Meilă VI** — a true metric on partitions; `H(b|a) = 0` is an exact identity for a clean
+  coarsening, not a threshold. Distinguishes *found new structure* from *merged what was
+  already there*.
+- **Noise agreement** — all four cells of clustered/noise against clustered/noise.
+
+**The caveat that must travel with it** (von Luxburg 2010): stability rises as clusterings
+get coarser — a 2-cluster solution is nearly always stable. Read it against cluster count,
+exactly like connectivity, and report the stability-vs-granularity curve rather than picking
+the single highest number.
+
+**Cost.** Fit time × replicates; probe labelling is ~3% of a cohort pass and rounds to
+nothing. At 3 replicates: **1.7 h** for the 12 cells up to 5M, **40.6 h** if the 25M row is
+included — so add 25M deliberately, on one cell, not across the block.
+
+`cross_size_ari.py` holds the comparison maths and is also usable standalone on any two saved
+labellings of the same rows.
+
+### Sources for the stability family
+
+| | |
+|---|---|
+| Per-cluster Jaccard, the 0.75 / 0.5 thresholds | Hennig (2007), *Cluster-wise assessment of cluster stability*, Comput. Stat. Data Anal. 52(1):258–271 |
+| Stability as a validation principle | Ben-Hur, Elisseeff & Guyon (2002), PSB 7:6–17; Lange, Roth, Braun & Buhmann (2004), Neural Computation 16(6):1299–1323 |
+| Prediction strength | Tibshirani & Walther (2005), *Cluster Validation by Prediction Strength*, JCGS 14(3):511–528 |
+| The caveat, and when stability misleads | von Luxburg (2010), *Clustering Stability: An Overview*, Found. Trends ML 2(3):235–274 |
+| Variation of information | Meilă (2007), *Comparing clusterings — an information based distance*, J. Multivariate Analysis 98(5):873–895 |
 
 ---
 
@@ -115,9 +235,8 @@ cosine, pooled across all five cells, was **0.073**.
 - **Silhouette / Davies–Bouldin / Calinski–Harabasz.** They assume convex, isotropic
   clusters. HDBSCAN on a UMAP embedding produces neither, and they would rank a wrong answer
   above a right one.
-- **DBCV.** Density-aware and the right family, but `LIMITATIONS.md` caps it at a 25k-row
-  sample and skips cells above 500 clusters — most of this grid. Available via
-  `rescore_dbcv.py` if wanted for the finalists.
+- ~~**DBCV.**~~ Was skipped above 500 clusters — most of this grid. **Stratified sampling
+  removed that ceiling**, so DBCV is now scored on every cell. See above.
 - **Cluster count as a target.** Seed-sensitive by ±5 % at 25M fit rows (final_models caveat
   1). A count difference between two cells is not by itself a real effect.
 
@@ -125,19 +244,28 @@ cosine, pooled across all five cells, was **0.073**.
 
 ## Two things to settle before trusting any of it
 
-**1. `uv_only` versus full COSMIC — this decides what is being optimised.**
-Median cosine was **0.296 at every single `mcs`** in the earlier sweep, and the distribution
-is bimodal. The row filter (`st='MIXED' AND et='MIXED' AND FILT=1`) admits non-UV variants,
-but assignment used the restricted `uv_only` set. If most reads are not UV, no UV-only
-reference can fit them and no HDBSCAN parameter will change that.
+**1. ~~`uv_only` versus full COSMIC~~ — SETTLED 2026-08-13. `uv_only` was the wrong reference.**
+On the same matrix, full COSMIC v3.5 lifts median cosine **0.25 → 0.73** and mutation share
+above 0.7 from **5.6% → 51.8%**. Every `uv_only` number in the sweep is measured through a
+reference that cannot fit the data. Re-score before drawing conclusions from any of them.
 
-Re-running the pipeline against all of COSMIC costs seconds on a matrix that already exists.
-Do it on one finished cell before committing GPU-days:
+What full COSMIC shows, across four cells spanning 89 → 1,330 clusters: **UV 8.75–9.38%,
+artefact-suspect (SBS45–60) 20.2–22.6%, unknown-etiology (SBS96+) 10.4–12.1%** — a 15× change
+in granularity moves UV by 0.63 points. The composition is a property of the cohort, not of
+the clustering.
 
-- Low-cosine clusters fit *other* signatures → real non-UV structure, and the objective
-  becomes "maximise clusters above threshold across the full reference".
-- They still fit nothing → unstructured reads, and the objective is "maximise mutation share
-  in well-fit clusters while keeping noise low".
+A shuffled null (same cluster sizes, permuted membership) recovers **UV 0.00%** and collapses
+onto unknown-etiology signatures at 47%, at a *higher* median cosine (0.80) than the real
+clustering. Two conclusions: the clustering is doing real work — UV is undetectable in the
+pooled cohort and only becomes assignable after clustering — and **"maximise cosine" is a
+broken objective**, because a meaningless clustering wins on it. Smooth, averaged spectra fit
+easily; the real, spiky ones do not.
+
+**Cosine is also weaker than it looks.** SigProfiler's reconstruction preserves total counts
+exactly (verified: recon/obs = 1.0000), so `L1_Norm_% = 133` means **~67% of a cluster's
+mutations sit in a channel the fit did not predict** — at a reported cosine of 0.753. One
+cluster reports cosine 0.911 with L1 120.6%, i.e. ~60% of its mass misplaced. L1 is the
+honest fit statistic, and it is 168–177% in every cell of the grid.
 
 **2. The RBC labelling is not bit-identical to `approximate_predict`.** Measured on the 2M
 eval probe against the 25M model: **97.67 %** exact agreement. The disagreement is almost

@@ -34,6 +34,10 @@ METHODS="${METHODS:-eom}"
 EPSILONS="${EPSILONS:-0.0}"
 GPU_TOTAL_GB="${GPU_TOTAL_GB:-40}"
 SEED="${SEED:-42}"
+# Points drawn from EVERY cluster for DBCV. Fixing this rather than a total budget is what
+# makes the score comparable between cells -- a fixed total scores a 176-cluster cell and a
+# 1,330-cluster cell at different resolutions, and sampled DBCV's bias moves with resolution.
+DBCV_PER_CLUSTER="${DBCV_PER_CLUSTER:-50}"
 
 if command -v micromamba &>/dev/null; then
     eval "$(micromamba shell hook --shell bash)"

@@ -139,13 +139,20 @@ def transform_latents(model_path: Path, latent_path: Path, positions: np.ndarray
     return np.ascontiguousarray(np.asarray(embedded), dtype=np.float64)
 
 
-def score_cell(space: np.ndarray, labels: np.ndarray, sample: np.ndarray) -> dict:
+def score_cell(space: np.ndarray, labels: np.ndarray, sample: np.ndarray,
+               per_cluster: bool = False) -> dict:
     """DBCV for one cell's labels over the shared sample.
 
     Noise is dropped rather than scored: DBCV is defined over clustered points, and
     hdbscan's validity_index would otherwise treat -1 as an ordinary cluster. Labels
     are made contiguous afterwards because the implementation indexes clusters by
     position, not by id.
+
+    ``per_cluster=True`` additionally returns the per-cluster validity array and the
+    original cluster ids it corresponds to. Callers that sample non-uniformly need both:
+    the aggregate validity_index returns is weighted by the *sampled* cluster sizes, which
+    only match the true sizes under uniform sampling. With the ids and the per-cluster
+    scores a caller can reweight by the true sizes and recover the correct aggregate.
     """
     from hdbscan.validity import validity_index
 
@@ -180,7 +187,15 @@ def score_cell(space: np.ndarray, labels: np.ndarray, sample: np.ndarray) -> dic
                         f"{MIN_SAMPLED_POINTS_PER_CLUSTER}+ sampled points",
                 **detail}
 
-    score = validity_index(X, y.astype(np.int64, copy=False), metric="euclidean")
+    if not per_cluster:
+        score = validity_index(X, y.astype(np.int64, copy=False), metric="euclidean")
+        return {"dbcv": None if not np.isfinite(score) else float(score), **detail}
+
+    score, per_cluster_scores = validity_index(
+        X, y.astype(np.int64, copy=False), metric="euclidean", per_cluster_scores=True)
+    detail["per_cluster_dbcv"] = [float(v) for v in np.asarray(per_cluster_scores)]
+    # The ids the caller knew these clusters by, in the same order as the scores above.
+    detail["scored_cluster_ids"] = [int(v) for v in unique[keep]]
     return {"dbcv": None if not np.isfinite(score) else float(score), **detail}
 
 

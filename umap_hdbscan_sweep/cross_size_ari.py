@@ -155,6 +155,60 @@ def mapping_purity(counts: np.ndarray, rows: np.ndarray) -> float:
     return float(counts.max(axis=1).sum()) / n
 
 
+# Hennig (2007) reads a cluster's maximum Jaccard across resamples as: above 0.75 the cluster
+# is a stable, reproducible pattern; below 0.5 it is "dissolved" and should not be
+# interpreted; between the two it is a real but uncertain pattern.
+JACCARD_STABLE = 0.75
+JACCARD_DISSOLVED = 0.5
+
+
+def cluster_jaccard(counts: np.ndarray, rows: np.ndarray, cols: np.ndarray,
+                    chunk: int = 4096) -> dict:
+    """For each cluster in A, the Jaccard of its best match in B.
+
+    Hennig (2007), "Cluster-wise assessment of cluster stability", Comput. Stat. Data Anal.
+    52(1):258-271. The global scores above collapse a whole partition to one number; this
+    keeps per-cluster resolution, so the answer is "412 of 584 clusters reproduce" rather
+    than "ARI 0.31" -- and it says WHICH ones, since a few large unstable clusters and a
+    long tail of unstable micro-clusters give the same ARI.
+
+    Hennig resamples and matches each original cluster against the resampled clustering. Here
+    the two sides are two independent fits, so the comparison is symmetric and the caller
+    runs it in both directions.
+
+    Reported by cluster count AND by point share, because they answer different questions:
+    a hundred unstable micro-clusters barely move the point share, while one unstable cluster
+    holding a third of the data barely moves the count.
+    """
+    n_a = counts.shape[0]
+    if n_a == 0 or counts.sum() == 0:
+        return {}
+
+    best = np.empty(n_a, dtype=np.float64)
+    for start in range(0, n_a, chunk):
+        block = counts[start:start + chunk].astype(np.float64)
+        # |A n B| / |A u B|, and the union is |A| + |B| - |A n B|
+        union = rows[start:start + chunk, None] + cols[None, :] - block
+        with np.errstate(divide="ignore", invalid="ignore"):
+            best[start:start + chunk] = np.nanmax(np.where(union > 0, block / union, 0.0),
+                                                  axis=1)
+
+    weights = rows.astype(np.float64) / max(1.0, float(rows.sum()))
+    stable, dissolved = best >= JACCARD_STABLE, best < JACCARD_DISSOLVED
+    return {
+        "jaccard_mean": round(float(best.mean()), 4),
+        "jaccard_median": round(float(np.median(best)), 4),
+        "jaccard_p10": round(float(np.percentile(best, 10)), 4),
+        "clusters_stable": int(stable.sum()),
+        "clusters_dissolved": int(dissolved.sum()),
+        "frac_clusters_stable": round(float(stable.mean()), 4),
+        "frac_clusters_dissolved": round(float(dissolved.mean()), 4),
+        # The mass-weighted view. This is the number to quote.
+        "point_share_stable": round(float(weights[stable].sum()), 4),
+        "point_share_dissolved": round(float(weights[dissolved].sum()), 4),
+    }
+
+
 # ── loading ────────────────────────────────────────────────────────────────────
 
 def discover(labels_dir: Path) -> list[dict]:
@@ -217,6 +271,14 @@ def compare(a: np.ndarray, b: np.ndarray, mask: np.ndarray | None) -> dict:
         result["h_a_given_b"] = round(h_a_given_b, 4)
         result["clusters_a"] = int(np.unique(a[both]).size)
         result["clusters_b"] = int(np.unique(b[both]).size)
+
+        # Per-cluster reproducibility, both directions. Asymmetric on purpose: when b is a
+        # coarsening of a, every a-cluster has a good match in b but not the reverse, and
+        # the gap between the two directions is what says so.
+        for direction, (cc, rr, kk) in (("a_to_b", (c2, r2, k2)),
+                                        ("b_to_a", (c2.T, k2, r2))):
+            for key, value in cluster_jaccard(cc, rr, kk).items():
+                result[f"{key}_{direction}"] = value
     return result
 
 

@@ -16,10 +16,14 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from cluster_quality import (  # noqa: E402
+    MIN_PER_CLUSTER,
+    _allocate,
     connectivity,
     dbcv,
     persistence_stats,
     probability_stats,
+    relative_validity,
+    stratified_sample,
     summarise,
 )
 
@@ -175,8 +179,13 @@ def test_dbcv_sees_absorbed_scatter_that_connectivity_misses():
         ((contaminated[clean.shape[0]:, None, :] - centres[None]) ** 2).sum(-1), axis=1)
     dirty_labels = np.concatenate([clean_labels, scatter_labels]).astype(np.int32)
 
-    clean_dbcv = dbcv(clean, clean_labels, max_rows=2200)["dbcv"]
-    dirty_dbcv = dbcv(contaminated, dirty_labels, max_rows=2300)["dbcv"]
+    # per_cluster_rows=None for the fixed-budget path: detecting 4% absorbed scatter needs
+    # enough points per cluster to sample the scatter at all, and the default 50 draws about
+    # two of them. That is a real sensitivity limit of the per-cluster mode, not a test
+    # artefact -- see test_per_cluster_resolution_bounds_contamination_sensitivity.
+    clean_dbcv = dbcv(clean, clean_labels, max_rows=2200, per_cluster_rows=None)["dbcv"]
+    dirty_dbcv = dbcv(contaminated, dirty_labels, max_rows=2300,
+                      per_cluster_rows=None)["dbcv"]
     clean_connect = connectivity(clean, clean_labels, n_neighbours=10)["connectivity_mean"]
     dirty_connect = connectivity(contaminated, dirty_labels,
                                  n_neighbours=10)["connectivity_mean"]
@@ -213,3 +222,174 @@ def test_summarise_returns_numbers_without_ranking_them():
         assert key in record
     # Nothing that implies an ordering.
     assert not any(k in record for k in ("score", "rank", "best", "eligible", "verdict"))
+
+
+# ── stratified sampling ────────────────────────────────────────────────────────
+
+def test_allocation_spends_the_whole_budget():
+    """Runtime is set by the TOTAL sampled points, so an allocation that under-spends pays
+    the same order of cost for a worse estimate."""
+    quota = _allocate(np.array([1000, 1000, 1000, 1000]), 400)
+    assert quota.sum() == 400
+    assert set(quota) == {100}
+
+
+def test_allocation_redistributes_the_surplus_from_small_clusters():
+    """Two clusters can only supply 3 points each; the other 394 must go somewhere, or a
+    skewed clustering would silently sample far less than the budget allows."""
+    quota = _allocate(np.array([3, 3, 1000, 1000]), 400)
+    assert quota.tolist() == [3, 3, 197, 197]
+    assert quota.sum() == 400
+
+
+def test_allocation_never_asks_for_more_points_than_a_cluster_has():
+    sizes = np.array([5, 12, 400, 9000])
+    quota = _allocate(sizes, 2000)
+    assert (quota <= sizes).all()
+
+
+def test_allocation_degrades_gracefully_below_one_point_per_cluster():
+    quota = _allocate(np.array([10] * 100), 50)
+    assert quota.sum() == 50
+    assert set(np.unique(quota)) <= {0, 1}
+
+
+def test_stratified_sample_covers_every_cluster_where_uniform_does_not():
+    """The whole reason this exists. A heavy size skew starves small clusters under uniform
+    sampling until validity_index drops them; equal shares of the same budget do not."""
+    rng = np.random.default_rng(0)
+    sizes = np.concatenate([np.full(300, 200), np.full(10, 40_000)])
+    labels = np.repeat(np.arange(sizes.size), sizes).astype(np.int32)
+
+    strat = stratified_sample(labels, 12_000, seed=0)
+    per_strat = np.bincount(labels[strat], minlength=sizes.size)
+    assert (per_strat >= MIN_PER_CLUSTER).all()
+    assert per_strat.size == sizes.size
+
+    uniform = rng.choice(labels.size, size=12_000, replace=False)
+    per_uniform = np.bincount(labels[uniform], minlength=sizes.size)
+    assert (per_uniform < MIN_PER_CLUSTER).sum() > 0, "uniform should starve small clusters"
+
+
+def test_stratified_sample_stays_within_budget_and_is_deterministic():
+    labels = np.repeat(np.arange(50), 1000).astype(np.int32)
+    first = stratified_sample(labels, 5_000, seed=7)
+    second = stratified_sample(labels, 5_000, seed=7)
+    assert first.size <= 5_000
+    assert np.array_equal(first, second)
+
+
+def test_stratified_sample_ignores_noise_rows():
+    labels = np.array([-1] * 500 + [0] * 100 + [1] * 100, dtype=np.int32)
+    sample = stratified_sample(labels, 100, seed=0)
+    assert (labels[sample] >= 0).all()
+
+
+def test_stratified_sample_on_an_all_noise_labelling():
+    assert stratified_sample(np.full(50, -1, dtype=np.int32), 100).size == 0
+
+
+def test_stratified_dbcv_agrees_with_uniform_where_both_work():
+    """Stratifying changes which points are drawn, so the reweighted aggregate must still
+    estimate the same quantity -- otherwise scores are not comparable to the uniform ones
+    already recorded in the sweep."""
+    pytest.importorskip("hdbscan")
+    space, labels = blobs(per_cluster=400, spread=0.3)
+    a = dbcv(space, labels, max_rows=1200, seed=0, stratified=False)["dbcv"]
+    b = dbcv(space, labels, max_rows=1200, seed=0, stratified=True)["dbcv"]
+    assert a is not None and b is not None
+    assert abs(a - b) < 0.1, (a, b)
+
+
+def test_stratified_dbcv_reports_the_per_cluster_distribution():
+    """The resolution a single aggregate cannot give: which clusters are poor, and how much
+    of the data sits in them."""
+    pytest.importorskip("hdbscan")
+    space, labels = blobs(per_cluster=300)
+    record = dbcv(space, labels, max_rows=1000, seed=0, stratified=True)
+    for key in ["dbcv_sample_weighted", "dbcv_cluster_median", "dbcv_cluster_min",
+                "dbcv_frac_clusters_negative", "dbcv_point_share_negative",
+                "dbcv_sampling", "dbcv_sampled_rows"]:
+        assert key in record, key
+    assert record["dbcv_sampling"].startswith("stratified")
+    assert 0.0 <= record["dbcv_point_share_negative"] <= 1.0
+
+
+def test_per_cluster_mode_gives_every_cluster_the_same_resolution():
+    """THE property that makes DBCV comparable between models. A fixed TOTAL budget scores a
+    20-cluster model at 50 points per cluster and a 200-cluster model at 5 -- different
+    sampling resolution, different bias, scores that cannot be read against each other.
+    Fixing points-per-cluster fixes the bias."""
+    small = np.repeat(np.arange(20), 500).astype(np.int32)
+    large = np.repeat(np.arange(200), 500).astype(np.int32)
+
+    for labels in (small, large):
+        drawn = np.bincount(labels[stratified_sample(labels, per_cluster=40, seed=0)])
+        assert set(np.unique(drawn)) == {40}
+
+    # the fixed-budget mode does NOT have this property -- pinned so the difference is not
+    # quietly lost in a refactor
+    a = np.bincount(small[stratified_sample(small, budget=1000, seed=0)]).max()
+    b = np.bincount(large[stratified_sample(large, budget=1000, seed=0)]).max()
+    assert a != b
+
+
+def test_per_cluster_mode_never_over_draws_a_small_cluster():
+    labels = np.repeat([0, 1, 2], [500, 12, 7]).astype(np.int32)
+    drawn = np.bincount(labels[stratified_sample(labels, per_cluster=40, seed=0)])
+    assert drawn.tolist() == [40, 12, 7]
+
+
+def test_sampler_refuses_both_modes_at_once():
+    """Silently preferring one would make the resolution -- and so the comparability -- depend
+    on an argument the caller thought was ignored."""
+    labels = np.repeat(np.arange(4), 100).astype(np.int32)
+    with pytest.raises(ValueError):
+        stratified_sample(labels, budget=100, per_cluster=10)
+    with pytest.raises(ValueError):
+        stratified_sample(labels)
+
+
+def test_dbcv_records_the_resolution_it_used():
+    """Comparability has to be auditable, not assumed: two cells' scores are only comparable
+    if they were scored at the same points-per-cluster."""
+    pytest.importorskip("hdbscan")
+    space, labels = blobs(per_cluster=300)
+    record = dbcv(space, labels, per_cluster_rows=40, seed=0)
+    assert record["dbcv_points_per_cluster_median"] == 40
+    assert record["dbcv_sampling"] == "stratified_40_per_cluster"
+
+
+def test_dbcv_per_cluster_respects_the_minimum():
+    """Asking for fewer points than score_cell's drop threshold would silently discard every
+    cluster."""
+    pytest.importorskip("hdbscan")
+    space, labels = blobs(per_cluster=100)
+    record = dbcv(space, labels, per_cluster_rows=1, seed=0)
+    assert record["dbcv_points_per_cluster_median"] >= MIN_PER_CLUSTER
+
+
+def test_relative_validity_is_extracted_when_the_fit_provides_it():
+    pytest.importorskip("hdbscan")
+    import hdbscan as _h
+
+    space, _ = blobs(per_cluster=200, spread=0.3)
+    fitted = _h.HDBSCAN(min_cluster_size=30, gen_min_span_tree=True).fit(space)
+    stats = relative_validity(fitted)
+    assert "relative_validity" in stats
+    assert -1.0 <= stats["relative_validity"] <= 1.0
+
+
+def test_relative_validity_absent_without_the_min_span_tree():
+    """gen_min_span_tree defaults to False, and then the attribute raises rather than
+    existing -- so the helper must return nothing rather than propagate."""
+    assert relative_validity(object()) == {}
+
+
+def test_dbcv_has_no_cluster_ceiling_by_default():
+    """The old default refused above 500 clusters, which excluded most of the real grid.
+    Stratified sampling removes the reason for the ceiling."""
+    pytest.importorskip("hdbscan")
+    space, labels = blobs(per_cluster=200)
+    record = dbcv(space, labels, max_rows=800, seed=0)
+    assert "exceeds max_clusters" not in record.get("dbcv_note", "")
