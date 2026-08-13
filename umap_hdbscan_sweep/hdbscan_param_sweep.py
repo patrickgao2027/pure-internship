@@ -261,29 +261,21 @@ def run_cell(cell: Cell, coords: np.ndarray, cell_dir: Path, args,
     record["label_seconds"] = round(perf_counter() - started, 1)
     record["held_mean_probability"] = float(held_probabilities.mean())
 
-    # Kept, not dropped after taking the mean. These are a by-product of a labelling pass
-    # that has already happened -- 630 MB per cell against a fit measured in hours -- but
-    # without them run_variant_cluster_pipeline's cluster_probability plot cannot be drawn
-    # and its profile panels have no mean/median p to report. The only way to recover them
-    # is to re-fit the cell, because the clusterer itself is never persisted.
+    # Kept, not dropped after taking the mean. The per-row values are a by-product of a
+    # labelling pass that has already happened, and are 630 MB against the fit's hours --
+    # but without them run_variant_cluster_pipeline's cluster_probability plot cannot be
+    # drawn and its profile panels have no mean/median p to report, and the only way to get
+    # them back is to re-fit the cell from scratch.
     if not args.skip_probabilities:
         probabilities = np.empty(total_rows, dtype=np.float32)
-        # The fit rows keep the fit's own probabilities for the same reason they keep its
-        # labels: approximate_predict is an approximation OF the fit, so where the fit's
-        # own answer exists it is the better one. cuML has exposed probabilities_ on every
-        # build used here, but it is fetched defensively -- a missing attribute should cost
-        # the fit rows their probabilities, not the whole cell.
         fit_probabilities = getattr(clusterer, "probabilities_", None)
-        if fit_probabilities is None:
-            log("    clusterer exposes no probabilities_; fit rows recorded as 1.0")
-            probabilities[fit_indices] = 1.0
-        else:
-            probabilities[fit_indices] = np.asarray(
-                _to_host(fit_probabilities), dtype=np.float32)
+        probabilities[fit_indices] = (
+            np.ones(len(fit_indices), dtype=np.float32) if fit_probabilities is None
+            else np.asarray(_to_host(fit_probabilities), dtype=np.float32)
+        )
         probabilities[held_indices] = held_probabilities
         np.save(cell_dir / "cohort_probabilities.npy", probabilities)
         record["cohort_probabilities"] = str(cell_dir / "cohort_probabilities.npy")
-        record["cohort_mean_probability"] = float(probabilities.mean())
         del probabilities
     del held_labels, held_probabilities
 
@@ -327,10 +319,16 @@ def _score_geometry(record: dict, fit_coords: np.ndarray, fit_labels: np.ndarray
             connectivity_rows=args.connectivity_rows,
             dbcv_rows=args.dbcv_rows,
             dbcv_max_clusters=args.dbcv_max_clusters,
+            dbcv_stratified=not args.dbcv_uniform,
+            dbcv_per_cluster=args.dbcv_per_cluster or None,
+            dbcv_backend=args.dbcv_backend,
             seed=args.seed)
         record["geometry_seconds"] = round(perf_counter() - started, 1)
         geometry = record["geometry"]
-        log(f"    DBCV {geometry.get('dbcv')}, "
+        relative = geometry.get("relative_validity")
+        log(f"    DBCV {geometry.get('dbcv')} "
+            f"({geometry.get('dbcv_points_per_cluster_median')} pts/cluster), "
+            f"rel_validity {'n/a' if relative is None else f'{relative:.4f}'}, "
             f"connectivity {geometry.get('connectivity_mean', float('nan')):.3f}, "
             f"prob mean {geometry.get('prob_mean', float('nan')):.3f}")
     except Exception as exc:  # noqa: BLE001
@@ -408,22 +406,31 @@ def _score_cell(record: dict, cell_dir: Path, sbs96_index: np.ndarray, labels: n
 
 
 def _fit_hdbscan(fit_coords: np.ndarray, cell: Cell, args):
+    """Fit, asking for the MST so relative_validity_ is available.
+
+    ``gen_min_span_tree=True`` retains the mutual-reachability MST the clustering already
+    builds, which is what populates ``relative_validity_`` -- a DBCV approximation over ALL
+    fit points rather than a subsample, for almost no extra cost. Not every backend accepts
+    the argument, so it is requested and then retried without on TypeError rather than
+    assumed.
+    """
+    common = dict(min_cluster_size=cell.min_cluster_size, min_samples=cell.min_samples,
+                  cluster_selection_method=cell.cluster_selection_method,
+                  cluster_selection_epsilon=cell.cluster_selection_epsilon,
+                  metric="euclidean", prediction_data=True)
     try:
         from cuml.cluster import HDBSCAN as CumlHDBSCAN
-        return CumlHDBSCAN(
-            min_cluster_size=cell.min_cluster_size, min_samples=cell.min_samples,
-            cluster_selection_method=cell.cluster_selection_method,
-            cluster_selection_epsilon=cell.cluster_selection_epsilon,
-            metric="euclidean", prediction_data=True,
-        ).fit(fit_coords)
+        build, extra = CumlHDBSCAN, {}
     except ImportError:
         import hdbscan
-        return hdbscan.HDBSCAN(
-            min_cluster_size=cell.min_cluster_size, min_samples=cell.min_samples,
-            cluster_selection_method=cell.cluster_selection_method,
-            cluster_selection_epsilon=cell.cluster_selection_epsilon,
-            metric="euclidean", prediction_data=True, core_dist_n_jobs=args.threads,
-        ).fit(fit_coords)
+        build, extra = hdbscan.HDBSCAN, {"core_dist_n_jobs": args.threads}
+
+    if not args.no_min_span_tree:
+        try:
+            return build(**common, **extra, gen_min_span_tree=True).fit(fit_coords)
+        except TypeError:
+            log("    backend rejected gen_min_span_tree; relative_validity_ unavailable")
+    return build(**common, **extra).fit(fit_coords)
 
 
 def _to_host(array):
@@ -507,8 +514,30 @@ def parse_args() -> argparse.Namespace:
                         help="skip DBCV/connectivity/probability/persistence metrics")
     parser.add_argument("--connectivity-rows", type=int, default=200_000)
     parser.add_argument("--dbcv-rows", type=int, default=25_000)
-    parser.add_argument("--dbcv-max-clusters", type=int, default=500,
-                        help="above this, validity_index raises on sparsely-sampled clusters")
+    parser.add_argument("--dbcv-max-clusters", type=int, default=None,
+                        help="refuse DBCV above this many clusters. Default None: stratified "
+                             "sampling keeps every cluster scoreable, so the old ceiling of "
+                             "500 (which left 17 of 28 cells unscored) is no longer needed.")
+    parser.add_argument("--dbcv-uniform", action="store_true",
+                        help="sample DBCV rows uniformly instead of stratified by cluster "
+                             "(the pre-2026-08-13 behaviour; starves small clusters)")
+    parser.add_argument("--dbcv-backend", default="auto",
+                        choices=["auto", "kdbcv", "hdbscan"],
+                        help="auto prefers k-DBCV (KD-tree; 42x faster at k=400, agrees "
+                             "with hdbscan to 0.001) and falls back if it is not installed")
+    parser.add_argument("--dbcv-per-cluster", type=int, default=400,
+                        help="points drawn from EVERY cluster. Fixing this rather than the "
+                             "total is what makes DBCV comparable between cells: the bias "
+                             "of a sampled DBCV depends on per-cluster resolution. 0 falls "
+                             "back to a fixed --dbcv-rows total budget.")
+    parser.add_argument("--no-min-span-tree", action="store_true",
+                        help="skip gen_min_span_tree=True, losing relative_validity_")
+    parser.add_argument("--skip-probabilities", action="store_true",
+                        help="do not write cohort_probabilities.npy (630 MB/cell at 157.5M "
+                             "rows). Without it there is no per-row membership probability, "
+                             "so run_variant_cluster_pipeline's cluster_probability plot "
+                             "cannot be drawn and profile panels report 'mean p = nan' -- "
+                             "and recovering them means re-fitting the cell.")
 
     parser.add_argument("--dry-run", action="store_true",
                         help="print the grid and its projected cost, run nothing")
@@ -526,12 +555,6 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--backend", default="rbc", choices=["rbc", "brute", "sklearn"])
     parser.add_argument("--batch-rows", type=int, default=5_000_000)
-    parser.add_argument("--skip-probabilities", action="store_true",
-                        help="do not write cohort_probabilities.npy (630 MB/cell at 157.5M "
-                             "rows). Without it there is no per-row membership probability, "
-                             "so run_variant_cluster_pipeline's cluster_probability plot "
-                             "cannot be drawn and its profile panels report 'mean p = nan' "
-                             "-- and recovering them means re-fitting the cell.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--threads", type=int, default=16)
     parser.add_argument("--gpu-budget-gb", type=float, default=None)
