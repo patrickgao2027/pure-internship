@@ -47,7 +47,9 @@ DEFAULT_CELLS = REPO / "umap_tests" / "param_sweep" / "cells"
 SUBSTITUTIONS = ["C>A", "C>G", "C>T", "T>A", "T>C", "T>G"]
 SUB_COLOURS = {"C>A": "#03BCEE", "C>G": "#000000", "C>T": "#E32926",
                "T>A": "#CAC9C9", "T>C": "#A1CE63", "T>G": "#EBC6C4"}
-NOISE_COLOUR = "#d9d9d9"
+# COSMIC's T>A is #CAC9C9, so noise has to sit well clear of it or the two read as one
+# colour. Pale blue is the closest thing to "grey" that no substitution occupies.
+NOISE_COLOUR = "#eceff4"
 
 
 def parse_args() -> argparse.Namespace:
