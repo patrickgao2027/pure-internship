@@ -64,7 +64,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--point-size", type=float, default=0.6)
     p.add_argument("--ncols", type=int, default=0, help="0 = choose automatically")
     p.add_argument("--dpi", type=int, default=150)
-    p.add_argument("--output", type=Path, default=Path("umap_param_sweep.png"))
+    p.add_argument("--output", type=Path, default=Path("umap_plots"),
+                   help="output directory (created if needed); one PNG per cell")
     return p.parse_args()
 
 
@@ -167,12 +168,10 @@ def main() -> int:
     xy = np.asarray(coords[positions], dtype=np.float32)
     print(f"coords {coords.shape[0]:,} rows; plotting {positions.size:,} sampled")
 
-    ncols = args.ncols or (1 if len(cells) == 1 else min(3, len(cells)))
-    nrows = int(np.ceil(len(cells) / ncols))
-    fig, axes = plt.subplots(nrows, ncols, figsize=(5.4 * ncols, 5.4 * nrows),
-                             squeeze=False)
+    out_dir = args.output if args.output.suffix == "" else args.output.parent / args.output.stem
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    for i, cell in enumerate(cells):
+    for cell in cells:
         cell_dir = args.cells_root / cell
         labels = np.asarray(np.load(cell_dir / "cohort_labels.npy",
                                     mmap_mode="r")[positions])
@@ -183,28 +182,25 @@ def main() -> int:
                 print(f"  {cell}: no cluster_sbs96_matrix.tsv, drawing it grey")
             else:
                 dominant = dominant_substitution(hits[0])
-        n = panel(axes[i // ncols][i % ncols], xy, labels, cell, args.color_by,
-                  dominant, args.point_size)
-        print(f"  {cell:32} {n:5,} clusters  {100 * (labels < 0).mean():5.2f}% noise")
 
-    for j in range(len(cells), nrows * ncols):
-        axes[j // ncols][j % ncols].axis("off")
+        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+        n = panel(ax, xy, labels, cell, args.color_by, dominant, args.point_size)
 
-    if args.color_by == "substitution":
-        handles = [Line2D([], [], marker="o", linestyle="", markersize=7,
-                          color=SUB_COLOURS[s], label=s) for s in SUBSTITUTIONS]
-        handles.append(Line2D([], [], marker="o", linestyle="", markersize=7,
-                              color=NOISE_COLOUR, label="noise"))
-        fig.legend(handles=handles, loc="lower center", ncol=7, frameon=False,
-                   fontsize=9, bbox_to_anchor=(0.5, -0.01))
-        fig.suptitle("Clusters coloured by the substitution type of their dominant "
-                     "SBS96 channel", fontsize=11)
-    else:
-        fig.suptitle("HDBSCAN clusters on the shared UMAP embedding", fontsize=11)
+        if args.color_by == "substitution":
+            handles = [Line2D([], [], marker="o", linestyle="", markersize=7,
+                              color=SUB_COLOURS[s], label=s) for s in SUBSTITUTIONS]
+            handles.append(Line2D([], [], marker="o", linestyle="", markersize=7,
+                                  color=NOISE_COLOUR, label="noise"))
+            fig.legend(handles=handles, loc="lower center", ncol=7, frameon=False,
+                       fontsize=9, bbox_to_anchor=(0.5, -0.01))
 
-    fig.tight_layout(rect=(0, 0.03 if args.color_by == "substitution" else 0, 1, 0.97))
-    fig.savefig(args.output, dpi=args.dpi, bbox_inches="tight")
-    print(f"saved -> {args.output}")
+        fig.tight_layout(rect=(0, 0.04 if args.color_by == "substitution" else 0, 1, 1))
+        out_path = out_dir / f"{cell}_{args.color_by}.png"
+        fig.savefig(out_path, dpi=args.dpi, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  {cell:42} {n:5,} clusters  {100 * (labels < 0).mean():5.2f}% noise  -> {out_path.name}")
+
+    print(f"saved {len(cells)} images -> {out_dir}/")
     return 0
 
 
