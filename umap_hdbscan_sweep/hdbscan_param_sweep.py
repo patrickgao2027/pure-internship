@@ -260,6 +260,31 @@ def run_cell(cell: Cell, coords: np.ndarray, cell_dir: Path, args,
     labels[held_indices] = held_labels
     record["label_seconds"] = round(perf_counter() - started, 1)
     record["held_mean_probability"] = float(held_probabilities.mean())
+
+    # Kept, not dropped after taking the mean. These are a by-product of a labelling pass
+    # that has already happened -- 630 MB per cell against a fit measured in hours -- but
+    # without them run_variant_cluster_pipeline's cluster_probability plot cannot be drawn
+    # and its profile panels have no mean/median p to report. The only way to recover them
+    # is to re-fit the cell, because the clusterer itself is never persisted.
+    if not args.skip_probabilities:
+        probabilities = np.empty(total_rows, dtype=np.float32)
+        # The fit rows keep the fit's own probabilities for the same reason they keep its
+        # labels: approximate_predict is an approximation OF the fit, so where the fit's
+        # own answer exists it is the better one. cuML has exposed probabilities_ on every
+        # build used here, but it is fetched defensively -- a missing attribute should cost
+        # the fit rows their probabilities, not the whole cell.
+        fit_probabilities = getattr(clusterer, "probabilities_", None)
+        if fit_probabilities is None:
+            log("    clusterer exposes no probabilities_; fit rows recorded as 1.0")
+            probabilities[fit_indices] = 1.0
+        else:
+            probabilities[fit_indices] = np.asarray(
+                _to_host(fit_probabilities), dtype=np.float32)
+        probabilities[held_indices] = held_probabilities
+        np.save(cell_dir / "cohort_probabilities.npy", probabilities)
+        record["cohort_probabilities"] = str(cell_dir / "cohort_probabilities.npy")
+        record["cohort_mean_probability"] = float(probabilities.mean())
+        del probabilities
     del held_labels, held_probabilities
 
     np.save(cell_dir / "cohort_labels.npy", labels)
@@ -501,6 +526,12 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--backend", default="rbc", choices=["rbc", "brute", "sklearn"])
     parser.add_argument("--batch-rows", type=int, default=5_000_000)
+    parser.add_argument("--skip-probabilities", action="store_true",
+                        help="do not write cohort_probabilities.npy (630 MB/cell at 157.5M "
+                             "rows). Without it there is no per-row membership probability, "
+                             "so run_variant_cluster_pipeline's cluster_probability plot "
+                             "cannot be drawn and its profile panels report 'mean p = nan' "
+                             "-- and recovering them means re-fitting the cell.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--threads", type=int, default=16)
     parser.add_argument("--gpu-budget-gb", type=float, default=None)
