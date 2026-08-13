@@ -18,6 +18,18 @@ Two colourings, and the second is the interesting one:
     reads by trinucleotide context rather than by mutational process. Reads the per-cell
     ``cluster_sbs96_matrix.tsv`` that SigProfiler was already given, so it costs nothing.
 
+``--color-by sigprofiler``
+    Every cluster painted by its *dominant SigProfiler-assigned signature* -- the actual
+    fitting result, not a summary of raw counts. Reads each cell's
+    ``Assignment_Solution_Activities.txt`` (one row per cluster, one column per COSMIC
+    signature, values = mutations assigned to that signature) and picks the column with
+    the largest count per cluster. By default this is the ``sigprofilerassignment_uv_only``
+    run that exists for all 28 cells -- and because that reference set only contains UV
+    signatures (SBS7A/B/C/D, SBS38), every cluster is forced into one of those 5 regardless
+    of its true content (see Phase 0: uv_only cannot fit ~70% of clusters well, median
+    cosine 0.28). Pass ``--sig-run cosmic_full_rerun`` for the 4 cells that have a correct
+    full-COSMIC rerun instead.
+
 Usage (on miletus)::
 
     python umap_hdbscan_sweep/plot_param_sweep_cells.py \
@@ -51,6 +63,12 @@ SUB_COLOURS = {"C>A": "#03BCEE", "C>G": "#000000", "C>T": "#E32926",
 # colour. Pale blue is the closest thing to "grey" that no substitution occupies.
 NOISE_COLOUR = "#eceff4"
 
+# The 5 signatures every uv_only run's Activities.txt is restricted to. A cosmic_full_rerun
+# can contain any COSMIC signature, so its palette is built on the fly (tab20 cycle) instead.
+UV_ONLY_SIGNATURES = ["SBS7A", "SBS7B", "SBS7C", "SBS7D", "SBS38"]
+UV_ONLY_COLOURS = {"SBS7A": "#E32926", "SBS7B": "#03BCEE", "SBS7C": "#A1CE63",
+                   "SBS7D": "#EBC6C4", "SBS38": "#7B4FA3"}
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__,
@@ -60,7 +78,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--cells", nargs="*", default=None,
                    help="cell labels to plot; default is a spread across the grid")
     p.add_argument("--all", action="store_true", help="plot every finished cell")
-    p.add_argument("--color-by", choices=["cluster", "substitution"], default="cluster")
+    p.add_argument("--color-by", choices=["cluster", "substitution", "sigprofiler"],
+                   default="cluster")
+    p.add_argument("--sig-run", default="sigprofilerassignment_uv_only_grch38_v3.5",
+                   help="which SigProfiler output dir to read Activities.txt from "
+                        "(default: the uv_only run present in all 28 cells; pass "
+                        "'cosmic_full_rerun' for the 4 cells with the correct reference)")
     p.add_argument("--sample-rows", type=int, default=750_000)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--point-size", type=float, default=0.6)
@@ -95,6 +118,31 @@ def dominant_substitution(matrix_path: Path) -> dict[int, str]:
     return out
 
 
+def dominant_signature(activities_path: Path) -> tuple[dict[int, str], list[str]]:
+    """cluster id -> name of that cluster's largest-activity SigProfiler signature.
+
+    ``Assignment_Solution_Activities.txt``: one row per cluster (``Samples`` column holds
+    ``cluster_<id>``), one column per signature the run's reference set contains, values
+    are mutation counts SigProfiler assigned to that signature. Also returns the ordered
+    list of signature columns actually present, so the caller can build a matching legend
+    even for a non-uv_only run whose signature set isn't known ahead of time.
+    """
+    import polars as pl
+
+    frame = pl.read_csv(activities_path, separator="\t")
+    sig_columns = frame.columns[1:]
+    ids = frame[:, 0].to_list()
+    counts = frame.select(sig_columns).to_numpy()
+
+    out: dict[int, str] = {}
+    for row_id, row_counts in zip(ids, counts):
+        match = re.search(r"(\d+)$", str(row_id))
+        if match is None or row_counts.sum() <= 0:
+            continue
+        out[int(match.group(1))] = sig_columns[int(np.argmax(row_counts))]
+    return out, list(sig_columns)
+
+
 def sample_positions(total: int, wanted: int, seed: int) -> np.ndarray:
     if wanted >= total:
         return np.arange(total)
@@ -115,7 +163,8 @@ def default_selection(available: list[str]) -> list[str]:
     return picked or available[:4]
 
 
-def panel(ax, xy, labels, title, colour_by, dominant, point_size):
+def panel(ax, xy, labels, title, colour_by, dominant, point_size, categories=None,
+          colour_of=None):
     noise = labels < 0
     clustered = ~noise
 
@@ -130,15 +179,15 @@ def panel(ax, xy, labels, title, colour_by, dominant, point_size):
                    c=(labels[clustered] % 256) / 255.0, cmap="hsv",
                    alpha=0.45, linewidths=0, rasterized=True)
     else:
-        # One scatter call per substitution type keeps the legend honest and avoids
-        # building a 750k-long RGBA array.
-        for sub in SUBSTITUTIONS:
-            ids = {cid for cid, s in dominant.items() if s == sub}
+        # One scatter call per category keeps the legend honest and avoids building a
+        # 750k-long RGBA array.
+        for cat in categories:
+            ids = {cid for cid, s in dominant.items() if s == cat}
             if not ids:
                 continue
             mask = clustered & np.isin(labels, np.fromiter(ids, dtype=labels.dtype))
             if mask.any():
-                ax.scatter(xy[mask, 0], xy[mask, 1], s=point_size, c=SUB_COLOURS[sub],
+                ax.scatter(xy[mask, 0], xy[mask, 1], s=point_size, c=colour_of[cat],
                            alpha=0.45, linewidths=0, rasterized=True)
 
     ax.set_title(f"{title}\n{n_clusters:,} clusters · {100 * noise.mean():.1f}% noise",
@@ -178,25 +227,43 @@ def main() -> int:
         labels = np.asarray(np.load(cell_dir / "cohort_labels.npy",
                                     mmap_mode="r")[positions])
         dominant: dict[int, str] = {}
+        categories: list[str] = []
+        colour_of: dict[str, str] = {}
+
         if args.color_by == "substitution":
             hits = sorted(cell_dir.glob("**/cluster_sbs96_matrix.tsv"))
             if not hits:
                 print(f"  {cell}: no cluster_sbs96_matrix.tsv, drawing it grey")
             else:
                 dominant = dominant_substitution(hits[0])
+            categories, colour_of = SUBSTITUTIONS, SUB_COLOURS
+
+        elif args.color_by == "sigprofiler":
+            hits = sorted(cell_dir.glob(f"**/{args.sig_run}/**/Assignment_Solution_Activities.txt"))
+            if not hits:
+                print(f"  {cell}: no {args.sig_run} Activities.txt, drawing it grey")
+            else:
+                dominant, categories = dominant_signature(hits[0])
+                colour_of = {s: UV_ONLY_COLOURS.get(
+                    s, plt.get_cmap("tab20")(i % 20)) for i, s in enumerate(categories)}
 
         fig, ax = plt.subplots(1, 1, figsize=(8, 8))
-        n = panel(ax, xy, labels, cell, args.color_by, dominant, args.point_size)
+        n = panel(ax, xy, labels, cell, args.color_by, dominant, args.point_size,
+                 categories, colour_of)
 
-        if args.color_by == "substitution":
+        if args.color_by in ("substitution", "sigprofiler"):
             handles = [Line2D([], [], marker="o", linestyle="", markersize=7,
-                              color=SUB_COLOURS[s], label=s) for s in SUBSTITUTIONS]
+                              color=colour_of[c], label=c) for c in categories]
             handles.append(Line2D([], [], marker="o", linestyle="", markersize=7,
                                   color=NOISE_COLOUR, label="noise"))
-            fig.legend(handles=handles, loc="lower center", ncol=7, frameon=False,
-                       fontsize=9, bbox_to_anchor=(0.5, -0.01))
+            fig.legend(handles=handles, loc="lower center", ncol=min(len(handles), 7),
+                       frameon=False, fontsize=9, bbox_to_anchor=(0.5, -0.01))
+            if args.color_by == "sigprofiler" and args.sig_run.startswith("sigprofilerassignment_uv_only"):
+                fig.text(0.5, 0.965, "uv_only reference: every cluster forced into a UV "
+                         "signature regardless of true content (see Phase 0)",
+                         ha="center", fontsize=8, color="#a04040")
 
-        fig.tight_layout(rect=(0, 0.04 if args.color_by == "substitution" else 0, 1, 1))
+        fig.tight_layout(rect=(0, 0.04 if args.color_by in ("substitution", "sigprofiler") else 0, 1, 1))
         out_path = out_dir / f"{cell}_{args.color_by}.png"
         fig.savefig(out_path, dpi=args.dpi, bbox_inches="tight")
         plt.close(fig)
