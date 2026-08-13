@@ -471,20 +471,36 @@ def _fit_hdbscan(fit_coords: np.ndarray, cell: Cell, args):
 
     ``gen_min_span_tree=True`` retains the mutual-reachability MST the clustering already
     builds, which is what populates ``relative_validity_`` -- a DBCV approximation over ALL
-    fit points rather than a subsample, for almost no extra cost. Not every backend accepts
-    the argument, so it is requested and then retried without on TypeError rather than
-    assumed.
+    fit points rather than a subsample, for almost no extra cost.
+
+    **cuML's HDBSCAN does not implement ``outlier_scores_`` or ``exemplars_`` at all, and
+    its ``cluster_persistence_`` is degenerate** -- measured on the real 500K/mcs1000/ms15
+    cell as exactly 1.0 for every cluster, where a CPU fit on equivalent data gave a real
+    0.597-0.653 spread. This is not an argument cuML rejects (``gen_min_span_tree`` is
+    accepted without error); the attributes simply are not populated. There is no flag that
+    recovers them from a GPU fit -- only ``--cluster-backend cpu`` does, by fitting with the
+    CPU ``hdbscan`` package instead, which costs real wall time: CPU HDBSCAN has not been
+    benchmarked against this project's 2-D embedding at scale, so time it on your smallest
+    cell before requesting it on anything past a few million fit rows.
     """
     common = dict(min_cluster_size=cell.min_cluster_size, min_samples=cell.min_samples,
                   cluster_selection_method=cell.cluster_selection_method,
                   cluster_selection_epsilon=cell.cluster_selection_epsilon,
                   metric="euclidean", prediction_data=True)
-    try:
-        from cuml.cluster import HDBSCAN as CumlHDBSCAN
-        build, extra = CumlHDBSCAN, {}
-    except ImportError:
+
+    use_cpu = args.cluster_backend == "cpu"
+    if not use_cpu and args.cluster_backend == "auto":
+        try:
+            import cuml  # noqa: F401
+        except ImportError:
+            use_cpu = True
+
+    if use_cpu:
         import hdbscan
         build, extra = hdbscan.HDBSCAN, {"core_dist_n_jobs": args.threads}
+    else:
+        from cuml.cluster import HDBSCAN as CumlHDBSCAN
+        build, extra = CumlHDBSCAN, {}
 
     if not args.no_min_span_tree:
         try:
@@ -593,6 +609,13 @@ def parse_args() -> argparse.Namespace:
                              "back to a fixed --dbcv-rows total budget.")
     parser.add_argument("--no-min-span-tree", action="store_true",
                         help="skip gen_min_span_tree=True, losing relative_validity_")
+    parser.add_argument("--cluster-backend", default="auto", choices=["auto", "cuml", "cpu"],
+                        help="'auto' prefers cuML when importable (fast, but does not "
+                             "populate outlier_scores_/exemplars_ and reports a degenerate "
+                             "cluster_persistence_ -- measured as exactly 1.0 on the real "
+                             "data). 'cpu' forces the hdbscan package, which gives all four "
+                             "requested artefacts but is unbenchmarked at this project's "
+                             "scale -- time it on your smallest cell first.")
     parser.add_argument("--skip-model-artefacts", action="store_true",
                         help="do not save cluster_persistence.npy, outlier_scores.npy and "
                              "exemplars.npz. They are small (outlier scores dominate at "
