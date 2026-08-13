@@ -51,6 +51,12 @@ DEFAULT_ROW_FILTER = "st = 'MIXED' AND et = 'MIXED' AND FILT = 1"
 IDENTITY_COLUMNS = ["CHROM", "POS", "REF", "ALT"]
 # Context columns SigProfiler needs to build the SBS96 trinucleotide matrix downstream.
 CONTEXT_COLUMNS = ["X_PREV1", "X_NEXT1"]
+# Carried through because the ORDER BY below already reads them, so selecting them is free,
+# and because they are four of the eight columns run_variant_cluster_pipeline colours its
+# UMAP by. Leaving them out made those plots unreproducible for the cohort without a second
+# pass over all 5.08B source rows. SNVQ rides along for the same reason even though it is
+# deliberately not part of the ranking.
+QUALITY_COLUMNS = ["QUAL", "MAPQ", "DP", "RAW_VAF", "SNVQ"]
 
 
 def log(message: str) -> None:
@@ -108,10 +114,15 @@ def dedup_one_chromosome(
     row_filter: str,
     select_columns: list[str],
     output_path: Path,
+    tie_break_columns: list[str] | None = None,
 ) -> tuple[int, int]:
     """Write the deduplicated rows for one chromosome; return (reads_in, loci_out)."""
     select_list = ", ".join(quote_ident(name) for name in select_columns)
-    tie_break = stable_order_by(select_columns)
+    # Deliberately NOT select_columns: the quality columns were added to the SELECT list
+    # after the fact, and stable_order_by folds whatever it is given into the tie-break, so
+    # passing them here would change which row survives a tie and silently make this dedup
+    # disagree with every earlier one. The tie-break stays on the original column set.
+    tie_break = stable_order_by(tie_break_columns or select_columns)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # COUNT(*) OVER the same partition rides along on the window already being built for
@@ -181,12 +192,17 @@ def main() -> int:
     if missing_identity:
         raise SystemExit(f"cannot deduplicate: {missing_identity} absent from {paths[0]}")
 
-    select_columns = [
-        name for name in [*wanted, *IDENTITY_COLUMNS, *CONTEXT_COLUMNS] if name in available
-    ]
     # dict.fromkeys preserves order while dropping the duplicates the concatenation created.
-    select_columns = list(dict.fromkeys(select_columns))
-    log(f"Selecting {len(select_columns)} columns")
+    tie_break_columns = list(dict.fromkeys(
+        name for name in [*wanted, *IDENTITY_COLUMNS, *CONTEXT_COLUMNS] if name in available
+    ))
+    select_columns = list(dict.fromkeys([
+        *tie_break_columns,
+        *(name for name in QUALITY_COLUMNS if name in available),
+    ]))
+    extra = [name for name in select_columns if name not in tie_break_columns]
+    log(f"Selecting {len(select_columns)} columns"
+        + (f" (+{', '.join(extra)} carried for downstream plots)" if extra else ""))
 
     source = parquet_list_sql(paths)
     connection = connect_duckdb(
@@ -211,7 +227,8 @@ def main() -> int:
         chromosome_started = perf_counter()
         part_path = parts_dir / f"chrom={chromosome}.parquet"
         reads, loci = dedup_one_chromosome(
-            connection, source, chromosome, args.row_filter, select_columns, part_path
+            connection, source, chromosome, args.row_filter, select_columns, part_path,
+            tie_break_columns=tie_break_columns,
         )
         total_reads += reads
         total_loci += loci

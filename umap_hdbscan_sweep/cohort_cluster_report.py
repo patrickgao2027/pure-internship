@@ -89,6 +89,11 @@ os.environ.setdefault("UV_VAE_DISABLE_CUML", "1")
 # trial run's analysis.parquet carried.
 CONTEXT_COLUMNS = ["CHROM", "POS", "REF", "ALT", "X_PREV1", "X_NEXT1"]
 
+# Present in the source parquets and referenced by stage 0's ORDER BY, but absent from its
+# SELECT list -- so they exist upstream of the dedup output and nowhere inside it. Reachable
+# only via --source-glob, or by re-running stage 0 now that it carries them.
+RANKING_COLUMNS = ["QUAL", "MAPQ", "DP", "RAW_VAF", "SNVQ"]
+
 
 def log(message: str) -> None:
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}", flush=True)
@@ -117,14 +122,20 @@ def parse_args() -> argparse.Namespace:
                    help="rows sampled into analysis.parquet (stats, trinucs, profiles)")
     p.add_argument("--plot-rows", type=int, default=300_000,
                    help="rows subsampled from that for the scatter plots")
-    p.add_argument("--max-clusters", type=int, default=60,
-                   help="profile panels for the N largest clusters (0 = every cluster). "
-                        "write_cluster_profiles issues one query per cluster, so 500+ "
-                        "clusters is hours, not minutes")
+    p.add_argument("--max-clusters", type=int, default=0,
+                   help="profile panels for the N largest clusters; 0 (the default) means "
+                        "every cluster")
+    p.add_argument("--profile-workers", type=int, default=None,
+                   help="processes rendering profile panels (default: min(8, cpu_count))")
     p.add_argument("--color-columns", default=None,
-                   help="comma-separated override of the trial run's colour columns")
-    p.add_argument("--all-numeric-features", action="store_true",
-                   help="colour by every numeric VAE input instead of the trial's list")
+                   help="comma-separated override of the default colour columns")
+    p.add_argument("--source-glob", default=None,
+                   help="source parquets (e.g. '/data/lab/ppmseq_parquets/*.parquet'). "
+                        "Recovers QUAL/MAPQ/DP/RAW_VAF/SNVQ, which stage 0 ranks on but "
+                        "does not carry into its output, by joining the sampled loci back "
+                        "on CHROM/POS/REF/ALT. Costs one pass over the cohort")
+    p.add_argument("--vae-features-only", action="store_true",
+                   help="drop the ranking columns and colour by the numeric VAE inputs only")
     p.add_argument("--feature-spec-path", type=Path,
                    default=REPO_ROOT / "uv_vae" / "ml_features.json")
 
@@ -207,16 +218,67 @@ def read_dedup_columns(manifest_path: Path, positions: np.ndarray,
     return pl.concat(blocks, how="vertical"), skipped
 
 
-def resolve_color_columns(args, available: set[str], trial_default: list[str]) -> list[str]:
+def resolve_color_columns(args, trial_default: list[str], rvcp) -> tuple[list[str], list[str]]:
+    """(all requested colour columns, the subset that only the source parquets can supply).
+
+    The default is the union of the trial run's eight columns and every numeric VAE input,
+    which is what makes both questions answerable off one run: the trial's columns say
+    whether the old picture reproduces, and the VAE inputs say which of the model's own
+    features the embedding is organised around.
+    """
     from uv_vae.features import load_feature_specs
 
+    numeric_features = [s.name for s in load_feature_specs(args.feature_spec_path)
+                        if s.is_numeric]
     if args.color_columns:
         requested = [part.strip() for part in args.color_columns.split(",") if part.strip()]
-    elif args.all_numeric_features:
-        requested = [s.name for s in load_feature_specs(args.feature_spec_path) if s.is_numeric]
+    elif args.vae_features_only:
+        requested = numeric_features
     else:
-        requested = list(trial_default)
-    return requested
+        requested = rvcp.unique_columns([*trial_default, *numeric_features])
+    source_only = [name for name in requested if name in RANKING_COLUMNS]
+    return requested, source_only
+
+
+def read_source_columns(source_glob: str, keys: pl.DataFrame, columns: list[str],
+                        threads: int) -> pl.DataFrame:
+    """Recover ranking columns for the sampled loci by joining back to the source parquets.
+
+    stage 0 ranks on QUAL/MAPQ/DP/RAW_VAF to pick one row per locus but selects none of
+    them, so they exist upstream and nowhere downstream. The join is on the same key stage 0
+    partitioned by, and ``max`` reproduces the value on the surviving row for the three
+    columns the ranking is descending in. It cannot do so for SNVQ -- deliberately excluded
+    from the ranking -- so that column is the locus maximum, which is what a colour plot of
+    it should show anyway.
+
+    One pass over the cohort, pushed down to a semi-join on a temp table of the sample.
+    Returns one row per key, in the key frame's order.
+    """
+    from uv_vae.data import connect_duckdb
+
+    aggregates = ", ".join(f'max("{name}") AS "{name}"' for name in columns)
+    with connect_duckdb(threads=threads) as conn:
+        conn.register("sampled_keys", keys)
+        frame = conn.execute(f"""
+            WITH hits AS (
+                SELECT s."CHROM", s."POS", s."REF", s."ALT", {aggregates}
+                FROM read_parquet({sql_literal(source_glob)}) AS s
+                SEMI JOIN sampled_keys AS k
+                  ON s."CHROM" = k."CHROM" AND s."POS" = k."POS"
+                 AND s."REF" = k."REF" AND s."ALT" = k."ALT"
+                GROUP BY 1, 2, 3, 4
+            )
+            SELECT {", ".join(f'h."{name}"' for name in columns)}
+            FROM sampled_keys AS k
+            LEFT JOIN hits AS h
+              ON h."CHROM" = k."CHROM" AND h."POS" = k."POS"
+             AND h."REF" = k."REF" AND h."ALT" = k."ALT"
+        """).pl()
+    return frame
+
+
+def sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
 
 
 # ── per cell ───────────────────────────────────────────────────────────────────
@@ -224,7 +286,7 @@ def resolve_color_columns(args, available: set[str], trial_default: list[str]) -
 def build_cell_report(cell: str, cell_dir: Path, out_dir: Path, xy: np.ndarray,
                       positions: np.ndarray, context: pl.DataFrame,
                       color_columns: list[str], probabilities: np.ndarray | None,
-                      args, rvcp) -> dict:
+                      args, rvcp, cluster_profiles) -> dict:
     plots_dir = out_dir / "plots"
     profiles_dir = out_dir / "cluster_profiles"
     plots_dir.mkdir(parents=True, exist_ok=True)
@@ -298,13 +360,17 @@ def build_cell_report(cell: str, cell_dir: Path, out_dir: Path, xy: np.ndarray,
 
     rvcp.make_contact_sheet(plot_items, plots_dir / "umap_contact_sheet.png", columns=2)
 
-    manifest_path, trinuc_path = rvcp.write_cluster_profiles(
+    # cluster_profiles.write_cluster_profiles, not rvcp's: same signature and same output,
+    # but a single-scan point read and a render pool, which is what makes profiling all 500+
+    # clusters finish. See that module for what differs and why.
+    manifest_path, trinuc_path = cluster_profiles.write_cluster_profiles(
         output_dir=profiles_dir,
         plot_df=plot_df,
         analysis_path=analysis_path,
         cluster_stats=profiled_stats,
         trinuc192_counts=trinuc192,
         threads=args.threads,
+        max_workers=args.profile_workers,
     )
 
     cell_metrics = {}
@@ -339,6 +405,8 @@ def main() -> int:
     hidden = tuple(int(p) for p in args.hidden.split(",") if p.strip())
 
     import run_variant_cluster_pipeline as rvcp
+
+    import cluster_profiles
 
     summary = json.loads(args.embed_summary.read_text())
     latent_path = Path(summary["latent_path"])
@@ -378,14 +446,34 @@ def main() -> int:
         probabilities = np.asarray(
             np.load(args.probabilities, mmap_mode="r")[positions], dtype=np.float32)
 
-    color_columns = resolve_color_columns(args, set(), rvcp.DEFAULT_COLOR_COLUMNS)
+    color_columns, source_only = resolve_color_columns(
+        args, rvcp.DEFAULT_COLOR_COLUMNS, rvcp)
     wanted = rvcp.unique_columns([*CONTEXT_COLUMNS, *color_columns])
     log(f"reading {len(wanted)} columns from the dedup parts")
     context, skipped = read_dedup_columns(manifest_path, positions, wanted)
-    if skipped:
-        log(f"  not in the dedup output, skipped: {', '.join(skipped)}")
     if context.height != positions.size:
         raise SystemExit(f"gathered {context.height:,} rows, expected {positions.size:,}")
+
+    recovered: list[str] = []
+    if skipped and args.source_glob:
+        # Only chase the columns that are genuinely upstream-only. Anything else missing is
+        # a spec/parquet mismatch that a join cannot fix and should stay visible.
+        chase = [name for name in skipped if name in source_only]
+        if chase:
+            log(f"recovering {', '.join(chase)} from {args.source_glob} (one cohort pass)")
+            started = perf_counter()
+            extra = read_source_columns(
+                args.source_glob,
+                context.select(["CHROM", "POS", "REF", "ALT"]),
+                chase, args.threads,
+            )
+            context = pl.concat([context, extra], how="horizontal")
+            recovered = chase
+            skipped = [name for name in skipped if name not in chase]
+            log(f"  recovered in {perf_counter() - started:.0f}s")
+    if skipped:
+        note = "" if args.source_glob else " (pass --source-glob to recover the ranking ones)"
+        log(f"  not in the dedup output, skipped: {', '.join(skipped)}{note}")
 
     args.output_root.mkdir(parents=True, exist_ok=True)
     index: list[dict] = []
@@ -400,7 +488,7 @@ def main() -> int:
         started = perf_counter()
         record = build_cell_report(
             cell, args.cells_root / cell, out_dir, xy, positions, context,
-            color_columns, probabilities, args, rvcp,
+            color_columns, probabilities, args, rvcp, cluster_profiles,
         )
         record.update({
             "generated_utc": datetime.now(timezone.utc).isoformat(),
