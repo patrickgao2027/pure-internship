@@ -37,7 +37,22 @@ SEED="${SEED:-42}"
 # Points drawn from EVERY cluster for DBCV. Fixing this rather than a total budget is what
 # makes the score comparable between cells -- a fixed total scores a 176-cluster cell and a
 # 1,330-cluster cell at different resolutions, and sampled DBCV's bias moves with resolution.
-DBCV_PER_CLUSTER="${DBCV_PER_CLUSTER:-50}"
+# 400 because lower values cannot see contamination: measured at 30 clusters where the true
+# scores were clean +0.861 / contaminated -0.033, N=50 recovered only 19% of that gap, N=400
+# recovered 97%. Was previously declared here but never forwarded to python -- the script ran
+# on its own default (also 400) regardless of this variable. Now it actually takes effect.
+DBCV_PER_CLUSTER="${DBCV_PER_CLUSTER:-400}"
+# 'auto' prefers k-DBCV when PYTHONPATH exposes it (up to 42x faster at k=400, see
+# SWEEP_METRICS.md), else falls back to hdbscan's validity_index.
+DBCV_BACKEND="${DBCV_BACKEND:-auto}"
+# cuML's HDBSCAN does not implement outlier_scores_ or exemplars_ at all, and its
+# cluster_persistence_ is degenerate (measured: exactly 1.0 for every cluster on a real
+# cell, vs 0.10-0.15 median from an equivalent CPU fit). 'cpu' forces the hdbscan package
+# for the FIT itself so those three artefacts, plus relative_validity_, are real. Costs
+# real wall time -- CPU HDBSCAN fit at 500K rows measured 6.7s on miletus, but this has
+# not been benchmarked past that size on this project's embedding; time a probe cell
+# before setting this for large FIT_SIZES.
+CLUSTER_BACKEND="${CLUSTER_BACKEND:-auto}"
 
 if command -v micromamba &>/dev/null; then
     eval "$(micromamba shell hook --shell bash)"
@@ -76,6 +91,8 @@ echo "  output        : $OUTPUT_DIR"
 echo "  fit sizes     : $FIT_SIZES"
 echo "  mcs (fixed)   : $MIN_CLUSTER_SIZES"
 echo "  min_samples   : $MIN_SAMPLES"
+echo "  cluster fit   : $CLUSTER_BACKEND   (cpu = real persistence/exemplars/outliers, else cuML degenerate)"
+echo "  dbcv backend  : $DBCV_BACKEND, $DBCV_PER_CLUSTER pts/cluster"
 echo
 nvidia-smi --query-gpu=memory.used,memory.total --format=csv || true
 echo
@@ -90,4 +107,7 @@ python "$SCRIPT" \
     --epsilons "$EPSILONS" \
     --gpu-budget-gb "$GPU_TOTAL_GB" \
     --seed "$SEED" \
+    --dbcv-per-cluster "$DBCV_PER_CLUSTER" \
+    --dbcv-backend "$DBCV_BACKEND" \
+    --cluster-backend "$CLUSTER_BACKEND" \
     "${EXTRA[@]}" 2>&1 | tee -a "$OUTPUT_DIR/param_sweep.log"
