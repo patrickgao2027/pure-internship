@@ -377,10 +377,23 @@ def build_cell_report(cell: str, cell_dir: Path, out_dir: Path, xy: np.ndarray,
     metrics_file = cell_dir / "metrics.json"
     if metrics_file.exists():
         payload = json.loads(metrics_file.read_text())
-        cell_metrics = {k: payload.get(k) for k in
-                        ("fit_rows", "min_cluster_size", "min_samples",
-                         "cluster_selection_method", "cohort_n_clusters",
-                         "cohort_noise_fraction", "dbcv")}
+        # The parameters live under "cell" and the scores under "geometry" -- reading them
+        # off the top level silently yielded None for all five, so every report.json written
+        # before this carried no parameters and no DBCV.
+        cell = payload.get("cell") or {}
+        geometry = payload.get("geometry") or {}
+        cell_metrics = {
+            **{k: cell.get(k) for k in ("fit_rows", "min_cluster_size", "min_samples",
+                                        "cluster_selection_method")},
+            **{k: payload.get(k) for k in ("cohort_n_clusters", "cohort_noise_fraction")},
+            "dbcv": geometry.get("dbcv"),
+            # Which backend and resolution produced that DBCV -- two cells are only
+            # comparable when both match, so the report has to carry them.
+            "dbcv_backend": geometry.get("dbcv_backend"),
+            "dbcv_points_per_cluster": geometry.get("dbcv_points_per_cluster_median"),
+            "relative_validity": geometry.get("relative_validity"),
+            "persistence_median": geometry.get("persistence_median"),
+        }
 
     return {
         "cell": cell,
