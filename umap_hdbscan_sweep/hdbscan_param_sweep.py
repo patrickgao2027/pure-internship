@@ -289,6 +289,9 @@ def run_cell(cell: Cell, coords: np.ndarray, cell_dir: Path, args,
     if not args.skip_geometry:
         _score_geometry(record, fit_coords, fit_labels, clusterer, args)
 
+    if not args.skip_model_artefacts:
+        _save_model_artefacts(record, clusterer, cell_dir, args)
+
     if sbs96_index is not None:
         _score_cell(record, cell_dir, sbs96_index, labels, row_order,
                     signature_database, args)
@@ -296,6 +299,64 @@ def run_cell(cell: Cell, coords: np.ndarray, cell_dir: Path, args,
     record["finished"] = datetime.now(timezone.utc).isoformat()
     (cell_dir / "metrics.json").write_text(json.dumps(record, indent=2))
     return record
+
+
+def _save_model_artefacts(record: dict, clusterer, cell_dir: Path, args) -> None:
+    """Persist the small clusterer arrays that a re-fit would otherwise be needed to recover.
+
+    The fit is the entire cost of this sweep (3.2 h at 25M), and the clusterer object is
+    discarded when the process exits -- so anything derived from it and not written here is
+    only obtainable by paying that cost again. These four are all cheap:
+
+    * ``cluster_persistence.npy`` -- the RAW per-cluster array. ``metrics.json`` keeps only
+      mean/median/min/max/sum, which cannot answer "which clusters are ephemeral".
+    * ``outlier_scores.npy`` -- GLOSH per-point outlier strength over the fit set. Not
+      derivable from labels and probabilities; float32 halves it to ~100 MB at 25M rows.
+    * ``exemplars.npz`` -- the most persistent points of each cluster, the natural
+      representative for interpreting or plotting a cluster.
+    * ``relative_validity`` -- already a scalar inside ``geometry``; noted here for
+      completeness since it comes from the same object.
+
+    Each artefact is written under its own try/except: a backend that does not expose one
+    (cuML does not implement the full CPU attribute set) must not cost the others, and must
+    certainly not cost the fit.
+    """
+    saved, missing = {}, []
+
+    for name, attribute, dtype in (("cluster_persistence", "cluster_persistence_", np.float64),
+                                   ("outlier_scores", "outlier_scores_", np.float32)):
+        try:
+            values = getattr(clusterer, attribute, None)
+            if values is None:
+                missing.append(attribute)
+                continue
+            array = np.asarray(_to_host(values), dtype=dtype)
+            path = cell_dir / f"{name}.npy"
+            np.save(path, array)
+            saved[name] = {"path": str(path), "shape": list(array.shape)}
+        except Exception as exc:  # noqa: BLE001 - diagnostics must never cost the fit
+            missing.append(f"{attribute} ({type(exc).__name__})")
+
+    try:
+        exemplars = getattr(clusterer, "exemplars_", None)
+        if exemplars is None:
+            missing.append("exemplars_")
+        else:
+            # A ragged list, one array per cluster -- npz keeps them separate rather than
+            # forcing a padded rectangle that would silently invent points.
+            blocks = {f"cluster_{i}": np.asarray(_to_host(block), dtype=np.float32)
+                      for i, block in enumerate(exemplars)}
+            path = cell_dir / "exemplars.npz"
+            np.savez_compressed(path, **blocks)
+            saved["exemplars"] = {"path": str(path), "n_clusters": len(blocks)}
+    except Exception as exc:  # noqa: BLE001
+        missing.append(f"exemplars_ ({type(exc).__name__})")
+
+    record["model_artefacts"] = saved
+    if missing:
+        record["model_artefacts_missing"] = missing
+    log(f"    saved {', '.join(saved) or 'nothing'}"
+        + (f"; unavailable: {', '.join(missing)}" if missing else ""))
 
 
 def _score_geometry(record: dict, fit_coords: np.ndarray, fit_labels: np.ndarray,
@@ -532,6 +593,11 @@ def parse_args() -> argparse.Namespace:
                              "back to a fixed --dbcv-rows total budget.")
     parser.add_argument("--no-min-span-tree", action="store_true",
                         help="skip gen_min_span_tree=True, losing relative_validity_")
+    parser.add_argument("--skip-model-artefacts", action="store_true",
+                        help="do not save cluster_persistence.npy, outlier_scores.npy and "
+                             "exemplars.npz. They are small (outlier scores dominate at "
+                             "~100 MB/cell at 25M fit rows) and are NOT recoverable without "
+                             "re-fitting, which is the whole cost of the sweep.")
     parser.add_argument("--skip-probabilities", action="store_true",
                         help="do not write cohort_probabilities.npy (630 MB/cell at 157.5M "
                              "rows). Without it there is no per-row membership probability, "
