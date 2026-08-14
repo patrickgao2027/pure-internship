@@ -273,3 +273,18 @@ entirely the noise gate (2.27 % assigned-by-us / noise-by-cuML); genuine cluster
 disagreement is **0.001 %**. Brute force through the same code path shows the same 2.20 %
 gap, so this is cuML's `approximate_predict` differing from the CPU reference, not RBC. Every
 cell in the sweep is labelled the same way, so cross-cell comparisons are unaffected.
+
+---
+
+## GPU memory records (RTX PRO 5000 Blackwell, 47.7 GiB)
+
+Peak observed per fit size, from `scaling_results.json` and live nvidia-smi:
+
+| fit rows | min_samples | peak GPU RAM | notes |
+|---|---|---|---|
+| 500K–10M | 5 | 9.94 GiB | flat across this range |
+| 15M | 5 | 23.44 GiB | |
+| 25M | 5 | **30.8 GiB** | measured 2026-08-14; includes gen_min_span_tree MST + DBCV scoring (~7.4 GiB above the 23.4 GiB historical baseline) |
+| 25M | 15 | OOM | RMM pool exceeded at 33.72/36 GiB cap during `extra_min_samples_probe`; excluded from main sweep via `--max-ms-at-25m 5` |
+
+The ~7.4 GiB delta at 25M vs the historical baseline is attributable to two additions made in this sweep: `gen_min_span_tree=True` retaining the MST in GPU memory, and the DBCV scoring structures held during geometry computation.
