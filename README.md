@@ -321,3 +321,12 @@ All reproduction checks passed (delta=0.0): the negative silhouette values were 
 Mean cosine similarity ~0.30 across all 4 cells — nearly identical regardless of parameter choice.  Parameters move assignment rate (how many loci get a cluster), not assignment quality (how well clusters match UV signatures).  mcs1000_ms5 yielded 14.9M loci in clusters with cosine ≥ 0.7.
 
 **Conclusion:** The 2D VAE latent space forms real, well-separated clusters but leaves ~half the data as noise due to the continuous-gradient geometry of the space.  Adding UMAP before HDBSCAN (the standard pipeline) remains the expected path forward — UMAP explicitly optimises for density gaps, which is exactly what HDBSCAN needs.
+
+8/12 
+HDBSCAN 
+25M is theoretical limit, 50M OOMs
+approximate_predict time is also a constraint, 
+https://docs.rapids.ai/api/cuml/nightly/api/generated/cuml.neighbors.nearestneighbors/
+https://arxiv.org/pdf/1103.2635
+change KNN algorithms to RBC which is faster
+HDSBCAN backend uses KNN to find closest cluster

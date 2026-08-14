@@ -62,3 +62,18 @@ parquet_files/
 # past GitHub's 100 MB per-file limit.
 *.pt
 *.npy
+
+# ---------------------------------------------------------------------------
+# cohort_cluster_report.py output. Each cell writes one UMAP panel per colour
+# column plus one SBS96 profile PNG per cluster -- at 88-1,330 clusters a cell
+# that is 6.28 GB across 16,310 PNG files for the 28-cell grid. Nothing above
+# covered PNGs, so this was the one remaining path where a wildcard add from the
+# repo root would still have written multi-GB blobs into .git/objects.
+#
+# The report.json / summary.csv / index_all_cells.json are NOT ignored -- they
+# are the numbers, they are small, and they are what the plots are read beside.
+# cluster_profiles_manifest.json is 23 MB of PNG filenames and is regenerable.
+# ---------------------------------------------------------------------------
+**/cohort_reports*/**/plots/
+**/cohort_reports*/**/cluster_profiles/
+**/cohort_reports*/**/cluster_profiles_manifest.json
