@@ -288,3 +288,23 @@ Peak observed per fit size, from `scaling_results.json` and live nvidia-smi:
 | 25M | 15 | OOM | RMM pool exceeded at 33.72/36 GiB cap during `extra_min_samples_probe`; excluded from main sweep via `--max-ms-at-25m 5` |
 
 The ~7.4 GiB delta at 25M vs the historical baseline is attributable to two additions made in this sweep: `gen_min_span_tree=True` retaining the MST in GPU memory, and the DBCV scoring structures held during geometry computation.
+
+---
+
+## Refit findings (2026-08-13/14)
+
+Two passes were run after the main sweep to verify reproducibility and recover artefacts cuML cannot emit.
+
+**Pass 1 — cuML refit (28 cells).** ARI = 1.000 and differing_rows = 0 across all 28 cells (157.5M rows each, sampled 5M for ARI). Every cell is bit-identical to the original sweep. Source: `refit_check.json`.
+
+**Pass 2 — CPU `hdbscan` package refit (24 cells, fit ≤ 5M).** Recovers `outlier_scores_`, `exemplars_`, and real `cluster_persistence_` distributions unavailable from cuML. At 5M fit rows, CPU fit time ≈ cuML fit time (~457–460 s); there is no speed penalty for `--cluster-backend cpu` at this scale.
+
+### cuML `cluster_persistence_` degeneracy
+
+cuML's `cluster_persistence_` returns 1.0 for **26 of 28 cells**. This is **not universal**: at very low cluster counts (88–89 clusters, `fit500000_mcs2500_ms5` and `fit500000_mcs2500_ms15`) cuML produces real persistence distributions (median 0.195/0.200, min 0.004/0.010). CPU Pass 2 yields identical values for those same two cells, confirming it is a density-regime effect, not a cuML code-path artefact.
+
+The degeneracy threshold is somewhere between 89 clusters (real values) and 175 clusters (degenerate) — not yet precisely located. Treat all `persistence_*` values from cuML-backend cells above ~100 clusters as unreliable; use the CPU Pass 2 values for the 24 cells where they exist.
+
+### `relative_validity_` (CPU pass)
+
+`relative_validity_` is populated for the 24 CPU cells and ranges **0.21–0.33** across the sweep. It is HDBSCAN's own condensed-tree approximation to DBCV — cheaper but consistently lower than true DBCV, and not directly comparable to it. Read it as a within-cell consistency check, not a cross-metric comparison.
