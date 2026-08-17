@@ -31,21 +31,21 @@
 # rows) -- budget ~3 GB per concurrent job. The 28-wide default therefore wants ~84 GB free.
 # The script measures and warns before starting. If the box is smaller, trading outer for
 # inner parallelism costs nothing in wall time and a third of the RAM:
-#     PARALLEL_JOBS=10 WORKERS=3 bash clust_regime_sweep/scripts/run_feature_atlas.sh
+#     PARALLEL_JOBS=10 WORKERS=3 bash clust_regime_sweep/run_feature_atlas.sh
 #
 # LOGS. Every cell writes <cell>/feature_atlas/run.log (full stdout+stderr of that cell's run)
 # and <cell>/feature_atlas/.exit_status (its exit code). With 28 cells interleaving, the
 # console only carries START/DONE/FAIL lines; the per-cell log is where the feature table,
 # the timing, and any traceback actually land. Tail one while the sweep runs:
 #
-#     tail -f clust_regime_sweep/cohort_reports_original/*/feature_atlas/run.log
+#     tail -f "$REPORTS_DIR"/*/feature_atlas/run.log
 #
 # Usage:
-#     bash clust_regime_sweep/scripts/run_feature_atlas.sh
+#     bash clust_regime_sweep/run_feature_atlas.sh
 #
 # Env overrides:
-#     REPORTS_DIR    parent of the per-cell subdirs      [auto-detected]
-#     SCRIPT         plot_feature_atlas.py path          [auto-detected]
+#     REPORTS_DIR    parent of the per-cell subdirs      [required -- no default]
+#     SCRIPT         plot_feature_atlas.py path          [auto-detected from repo root]
 #     SAMPLE_ROWS    rows per cell; 0/all = every row    [0 -> full 2M pass]
 #     PARALLEL_JOBS  cells running concurrently          [28 = all at once]
 #     WORKERS        render processes inside each cell   [1]
@@ -54,23 +54,23 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DEFAULT_SCRIPT="$REPO_ROOT/umap_hdbscan_sweep/plot_feature_atlas.py"
 
-if [ -d "$HOME/pure-internship/clust_regime_sweep/cohort_reports_original" ]; then
-    DEFAULT_REPORTS="$HOME/pure-internship/clust_regime_sweep/cohort_reports_original"
-    DEFAULT_SCRIPT="$HOME/pure-internship/umap_hdbscan_sweep/plot_feature_atlas.py"
-else
-    DEFAULT_REPORTS="$REPO_ROOT/clust_regime_sweep/cohort_reports_original"
-    DEFAULT_SCRIPT="$REPO_ROOT/umap_hdbscan_sweep/plot_feature_atlas.py"
-fi
-
-REPORTS_DIR="${REPORTS_DIR:-$DEFAULT_REPORTS}"
+REPORTS_DIR="${REPORTS_DIR:-}"
 SCRIPT="${SCRIPT:-$DEFAULT_SCRIPT}"
 SAMPLE_ROWS="${SAMPLE_ROWS:-0}"
 PARALLEL_JOBS="${PARALLEL_JOBS:-28}"
 WORKERS="${WORKERS:-1}"
 DPI="${DPI:-150}"
 FORCE="${FORCE:-0}"
+
+if [ -z "$REPORTS_DIR" ]; then
+    echo "ERROR: set REPORTS_DIR to the folder containing the per-cell subdirs" >&2
+    echo "  e.g. REPORTS_DIR=~/pure-internship/umap_hdbscan_sweep/hdbscan/results/cohort_reports_original \\" >&2
+    echo "       bash clust_regime_sweep/run_feature_atlas.sh" >&2
+    exit 1
+fi
 
 # 0 / "all" means every row. sample_positions() takes min(wanted, total), so any number at or
 # above the cell size is a full pass; this is just a readable way to ask for one.
@@ -104,10 +104,6 @@ mapfile -t CELLS < <(find "$REPORTS_DIR" -mindepth 2 -maxdepth 2 -name analysis.
 
 CORES="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
 RAM_GB="$(awk '/^MemAvailable:/ {printf "%.0f", $2/1048576}' /proc/meminfo 2>/dev/null || true)"
-
-# A probe can come back empty as well as absent -- cygwin has /proc/meminfo but no
-# MemAvailable line, so awk succeeds and prints nothing. Anything that is not a run of digits
-# is unusable, and the arithmetic guards below must not see it.
 [[ "$CORES"  =~ ^[0-9]+$ ]] || CORES='?'
 [[ "$RAM_GB" =~ ^[0-9]+$ ]] || RAM_GB='?'
 
@@ -142,8 +138,6 @@ run_cell() {
     mkdir -p "$out_dir"
     rm -f "$out_dir/.exit_status"
 
-    # `|| status=$?` keeps set -e from killing the background job before the status is
-    # recorded -- the tally below reads these files, not the wait status.
     status=0
     python "$SCRIPT" \
         --analysis   "$cell_dir/analysis.parquet" \
@@ -165,9 +159,6 @@ LAUNCHED=0
 SKIPPED=0
 for cell_dir in "${CELLS[@]}"; do
     name="$(basename "$cell_dir")"
-    # Completion is judged on the recorded exit status, not on feature_atlas.csv: the csv is
-    # written before the contact sheets, so a cell that died during sheet assembly would look
-    # finished by file presence alone and get skipped on the retry pass.
     if [ "$FORCE" != "1" ] \
        && [ -f "$cell_dir/feature_atlas/feature_atlas.csv" ] \
        && [ "$(cat "$cell_dir/feature_atlas/.exit_status" 2>/dev/null || echo 1)" = "0" ]; then
@@ -176,7 +167,6 @@ for cell_dir in "${CELLS[@]}"; do
         continue
     fi
 
-    # jobs -rp is portable back to bash 4.0, unlike `wait -n`.
     while [ "$(jobs -rp | wc -l)" -ge "$PARALLEL_JOBS" ]; do sleep 2; done
 
     echo "[START] $name"
