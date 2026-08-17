@@ -135,9 +135,8 @@ def load_from_analysis(path: Path, wanted: int, seed: int) -> tuple[np.ndarray, 
     positions = sample_positions(total, wanted, seed)
     frame = pl.read_parquet(path)
     if positions.size < total:
-        # gather() takes the numpy index array directly; frame[positions.tolist()] would
-        # materialise a several-hundred-thousand-element Python list first.
-        frame = frame.gather(positions)
+        # row-index selection; list form works across all Polars versions
+        frame = frame[positions.tolist()]
     xy = frame.select(["umap_1", "umap_2"]).to_numpy().astype(np.float32)
     labels = (frame["cluster_label"].to_numpy().astype(np.int32)
               if "cluster_label" in frame.columns else None)
