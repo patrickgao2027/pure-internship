@@ -76,17 +76,12 @@ os.environ.setdefault("UV_VAE_DISABLE_CUML", "1")
 import numpy as np
 import polars as pl
 
-# Coordinates, identifiers and the label itself are not features. Kept identical to
-# feature_discrimination.EXCLUDE so the two tools agree on what counts as a feature; POS is
+# Coordinates, identifiers and the label itself are not features. POS is
 # excluded there as a near-unique integer and the same reasoning applies to a colour panel.
 EXCLUDE = {"umap_1", "umap_2", "cluster_label", "cluster_probability", "POS"}
 
 NULL_COLOUR = "#d0d0d0"
 OTHER_COLOUR = "#9e9e9e"
-
-# When a permuted-label null reaches this share of a categorical's raw NMI, the score is
-# mostly contingency-table sparsity rather than association. See chance_nmi.
-CHANCE_INFLATION = 0.25
 
 
 def log(message: str) -> None:
@@ -105,7 +100,7 @@ def parse_args() -> argparse.Namespace:
     source.add_argument("--encoder", type=Path, default=None,
                         help="parametric encoder .pt, used when --coords is absent")
     source.add_argument("--labels", type=Path, default=None,
-                        help="cohort_labels.npy; enables the discrimination scores")
+                        help="cohort_labels.npy (unused; kept for CLI compatibility)")
     source.add_argument("--source-glob", default=None,
                         help="also pull columns present only in the source parquets "
                              "(QUAL/MAPQ/DP/RAW_VAF/SNVQ), joined on CHROM/POS/REF/ALT")
@@ -199,92 +194,14 @@ def load_from_cohort(args) -> tuple[np.ndarray, pl.DataFrame, np.ndarray | None]
     return xy, features.drop([c for c in features.columns if c in EXCLUDE]), labels
 
 
-# ── scoring ────────────────────────────────────────────────────────────────────
-
-def score_feature(values, labels: np.ndarray | None, numeric: bool, seed: int = 0) -> dict:
-    """Discrimination against cluster_label, via feature_discrimination's own statistics.
-
-    Takes an already-converted pandas Series: the caller converts once and hands the same
-    object to ``build_task``, because ``to_pandas`` on a 300k-row column is not free and
-    doing it twice per feature doubled the setup cost for nothing.
-    """
-    import pandas as pd
-
-    import feature_discrimination as fd
-
-    non_null = float(values.notna().mean() * 100) if len(values) else 0.0
-    n_unique = int(values.nunique(dropna=True))
-    counts = values.value_counts(normalize=True, dropna=True)
+def describe_feature(values_pd, numeric: bool) -> dict:
+    """Basic descriptive stats for the panel title and CSV -- no scoring."""
+    non_null = float(values_pd.notna().mean() * 100) if len(values_pd) else 0.0
+    n_unique = int(values_pd.nunique(dropna=True))
+    counts = values_pd.value_counts(normalize=True, dropna=True)
     mode_share = float(counts.iloc[0]) if len(counts) else 1.0
-
-    record = {"kind": "numeric" if numeric else "categorical",
-              "statistic": "eta2" if numeric else "nmi",
-              "score": 0.0, "concentration": 0.0, "non_null_pct": non_null,
-              "n_unique": n_unique, "mode_share": mode_share, "palette_used": None,
-              "null_score": 0.0, "score_adjusted": None}
-
-    if numeric:
-        s = values.astype("float64")
-        lo, hi = s.min(), s.max()
-        p99 = s.quantile(0.99)
-        record["palette_used"] = float((p99 - lo) / (hi - lo)) if hi > lo else None
-
-    # Noise rows are excluded for the same reason feature_discrimination excludes them: -1 is
-    # not a cluster, and folding it in adds one large heterogeneous group that inflates every
-    # score. Without labels there is nothing to score against, and the panel is still drawn.
-    if labels is not None and n_unique > 1:
-        assigned = labels >= 0
-        if assigned.sum() > 1:
-            subset = values[assigned]
-            label_series = pd.Series(labels[assigned], index=subset.index)
-            if numeric:
-                record["score"], record["concentration"] = fd.eta_squared(subset, label_series)
-            else:
-                record["score"] = fd.normalised_mutual_info(subset, label_series)
-                record["null_score"] = chance_nmi(subset, label_series, seed)
-                # Chance-correct on the same scale the raw score uses. Measured on
-                # clust_regime_sweep/run1/vae_5pct at 120k sampled rows: CHROM scores NMI
-                # 0.052 against a null of 0.051 -- adjusted 0.001, and independently
-                # confirmed by rescoring on all 2.82M rows, where it falls to 0.004. The
-                # raw number was reporting contingency-table sparsity, not structure.
-                null = record["null_score"]
-                record["score_adjusted"] = ((record["score"] - null) / (1 - null)
-                                            if null < 1 else 0.0)
-
-    if labels is None:
-        record["verdict"] = "unscored"
-    elif not numeric and record["null_score"] > CHANCE_INFLATION * max(record["score"], 1e-12):
-        record["verdict"] = "CHANCE-INFLATED"
-    else:
-        # classify() reads "score"; give it the chance-corrected one for categoricals so a
-        # feature is not called discriminating on the strength of its cardinality.
-        record["verdict"] = fd.classify({**record, "score": effective_score(record)})
-    return record
-
-
-def chance_nmi(values, labels, seed: int) -> float:
-    """NMI against permuted labels: what this feature would score on structure alone.
-
-    A contingency table of ``n_levels x n_clusters`` cells estimated from a finite sample
-    carries an upward MI bias that grows with the cell count, so a high-cardinality column
-    scores well above zero against clusters it has no relationship with. Permuting the labels
-    destroys any real association while preserving both marginals and the sample size, so
-    whatever NMI survives is exactly that bias.
-
-    One permutation, not many: the bias is a smooth function of the table shape rather than a
-    noisy quantity, and this runs per feature per cell.
-    """
-    import feature_discrimination as fd
-
-    shuffled = labels.sample(frac=1.0, random_state=seed).reset_index(drop=True)
-    return fd.normalised_mutual_info(values.reset_index(drop=True), shuffled)
-
-
-def effective_score(record: dict) -> float:
-    """The score to rank and judge on: chance-corrected for categoricals, raw for numerics."""
-    if record["kind"] == "categorical" and record.get("score_adjusted") is not None:
-        return record["score_adjusted"]
-    return record["score"]
+    return {"kind": "numeric" if numeric else "categorical",
+            "non_null_pct": non_null, "n_unique": n_unique, "mode_share": mode_share}
 
 
 # ── rendering ──────────────────────────────────────────────────────────────────
@@ -354,18 +271,8 @@ def build_task(feature: str, series: pl.Series, values_pd, record: dict, args,
     numeric = record["kind"] == "numeric"
     missing = values_pd.isna().to_numpy()
 
-    if record["verdict"] == "unscored":
-        subtitle = "unscored"
-    elif record["kind"] == "categorical" and record["score_adjusted"] is not None:
-        # Both numbers, always: the raw NMI is what the sibling module reports, and hiding
-        # the gap between it and the chance-corrected value is how CHROM got read as
-        # meaningful in the first place.
-        subtitle = (f"nmi {record['score']:.3f} (chance {record['null_score']:.3f} "
-                    f"-> adj {record['score_adjusted']:.3f}) · {record['verdict']}")
-    else:
-        subtitle = f"{record['statistic']} {record['score']:.3f} · {record['verdict']}"
     title = (f"UMAP coloured by {feature}  [{record['kind']}]\n"
-             f"{subtitle} · {record['n_unique']:,} levels · "
+             f"{record['n_unique']:,} unique values · "
              f"{record['non_null_pct']:.1f}% non-null · "
              f"mode {record['mode_share'] * 100:.1f}%")
 
@@ -441,27 +348,19 @@ def main() -> int:
         features = features.select(args.features)
     if not features.columns:
         raise SystemExit("no feature columns left to plot")
-    if labels is None:
-        log("no cluster labels supplied -- panels drawn, discrimination scores skipped")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    log(f"scoring and preparing {len(features.columns)} features")
+    log(f"preparing {len(features.columns)} features")
     tasks, records = [], []
     for feature in features.columns:
         series = features[feature]
         numeric = series.dtype.is_numeric()
-        values_pd = series.to_pandas()  # converted once, used by both steps below
-        record = score_feature(values_pd, labels, numeric, args.seed)
+        values_pd = series.to_pandas()
+        record = describe_feature(values_pd, numeric)
         record["feature"] = feature
         records.append(record)
         tasks.append(build_task(feature, series, values_pd, record, args, args.output_dir))
-
-    # Most informative first, so the contact sheet opens on what matters. Ranked on the
-    # chance-corrected score, or a high-cardinality column sorts above real structure.
-    order = np.argsort([-effective_score(r) for r in records])
-    tasks = [tasks[i] for i in order]
-    records = [records[i] for i in order]
 
     workers = args.workers if args.workers is not None else min(8, os.cpu_count() or 1)
     workers = max(1, min(workers, len(tasks)))
@@ -479,10 +378,7 @@ def main() -> int:
 
     import pandas as pd
 
-    table = pd.DataFrame(records)[
-        ["feature", "kind", "statistic", "score", "null_score", "score_adjusted",
-         "concentration", "non_null_pct", "n_unique", "mode_share", "palette_used", "verdict"]
-    ]
+    table = pd.DataFrame(records)[["feature", "kind", "non_null_pct", "n_unique", "mode_share"]]
     csv_path = args.output_dir / "feature_atlas.csv"
     table.to_csv(csv_path, index=False)
 
@@ -496,18 +392,6 @@ def main() -> int:
     numeric_count = sum(1 for r in records if r["kind"] == "numeric")
     log(f"\n{len(records)} panels: {numeric_count} numeric, "
         f"{len(records) - numeric_count} categorical -> {args.output_dir}")
-    if labels is not None:
-        log("\nmost cluster-discriminating features (categoricals chance-corrected):")
-        for _, row in table.head(8).iterrows():
-            adjusted = ("" if pd.isna(row["score_adjusted"])
-                        else f" -> adj {row['score_adjusted']:.3f}")
-            log(f"  {row['feature']:>16} {row['statistic']:>5} {row['score']:>6.3f}"
-                f"{adjusted}  {row['verdict']}")
-        inflated = table.loc[table["verdict"] == "CHANCE-INFLATED", "feature"].tolist()
-        if inflated:
-            log(f"\n  CHANCE-INFLATED: {', '.join(inflated)}")
-            log("    raw NMI is mostly contingency-table sparsity (many levels x many "
-                "clusters over a finite sample), not association. Trust the adjusted score.")
     log(f"\nmanifest -> {csv_path}   ({perf_counter() - started:.0f}s)")
     return 0
 
