@@ -1,0 +1,1300 @@
+[23:07:29] === PASS 1: cuML reproducibility (full grid, matches original) ===
+[23:07:29] HDBSCAN parameter sweep
+  coords        : /home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests/hdbscan_scaling/coords.npy
+  context       : /home/patrick/pure-internship/uv_vae/runs/train_multi_20260802T192756Z/stage1_embed/context.parquet
+  output        : /home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests/param_sweep_refit
+  fit sizes     : 500000,1000000,5000000,25000000
+  mcs (fixed)   : 250,500,1000,2500
+  min_samples   : 5,15
+  cluster fit   : auto   (cpu = real persistence/exemplars/outliers, else cuML degenerate)
+  dbcv backend  : auto, 400 pts/cluster
+
+memory.used [MiB], memory.total [MiB]
+89 MiB, 48935 MiB
+
+[gpu_budget] cap 16.0 GB of 47.27 GB = torch 12.0 GB (fraction 0.2539) + rmm pool 4.0 GB
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1786651654.100038 1346113 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+I0000 00:00:1786651654.134771 1346113 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI AVX512_BF16 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1786651654.831159 1346113 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+[20:07:35] building SBS96 index over 157,501,580 rows (one-off, cached)
+[20:08:18]   100.00% of rows carry an SBS96 context
+[20:08:18] grid: 28 cells, 0 already done, 28 to run
+[20:08:18] projected: 14.2 h fitting + 3.4 h labelling/scoring = 17.6 h total
+[20:08:18]     fit500000_mcs250_ms5_eom                         ~   0.1 min fit
+[20:08:18]     fit500000_mcs500_ms5_eom                         ~   0.1 min fit
+[20:08:18]     fit500000_mcs1000_ms5_eom                        ~   0.1 min fit
+[20:08:18]     fit500000_mcs2500_ms5_eom                        ~   0.1 min fit
+[20:08:18]     fit500000_mcs250_ms15_eom                        ~   0.1 min fit
+[20:08:18]     fit500000_mcs500_ms15_eom                        ~   0.1 min fit
+[20:08:18]     fit500000_mcs1000_ms15_eom                       ~   0.1 min fit
+[20:08:18]     fit500000_mcs2500_ms15_eom                       ~   0.1 min fit
+[20:08:18]     fit1000000_mcs250_ms5_eom                        ~   0.4 min fit
+[20:08:18]     fit1000000_mcs500_ms5_eom                        ~   0.4 min fit
+[20:08:18]     fit1000000_mcs1000_ms5_eom                       ~   0.4 min fit
+[20:08:18]     fit1000000_mcs2500_ms5_eom                       ~   0.4 min fit
+[20:08:18]     fit1000000_mcs250_ms15_eom                       ~   0.5 min fit
+[20:08:18]     fit1000000_mcs500_ms15_eom                       ~   0.5 min fit
+[20:08:18]     fit1000000_mcs1000_ms15_eom                      ~   0.5 min fit
+[20:08:18]     fit1000000_mcs2500_ms15_eom                      ~   0.5 min fit
+[20:08:18]     fit5000000_mcs250_ms5_eom                        ~   7.8 min fit
+[20:08:18]     fit5000000_mcs500_ms5_eom                        ~   7.8 min fit
+[20:08:18]     fit5000000_mcs1000_ms5_eom                       ~   7.8 min fit
+[20:08:18]     fit5000000_mcs2500_ms5_eom                       ~   7.8 min fit
+[20:08:18]     fit5000000_mcs250_ms15_eom                       ~   9.4 min fit
+[20:08:18]     fit5000000_mcs500_ms15_eom                       ~   9.4 min fit
+[20:08:18]     fit5000000_mcs1000_ms15_eom                      ~   9.4 min fit
+[20:08:18]     fit5000000_mcs2500_ms15_eom                      ~   9.4 min fit
+[20:08:18]     fit25000000_mcs250_ms5_eom                       ~ 194.7 min fit
+[20:08:18]     fit25000000_mcs500_ms5_eom                       ~ 194.7 min fit
+[20:08:18]     fit25000000_mcs1000_ms5_eom                      ~ 194.7 min fit
+[20:08:18]     fit25000000_mcs2500_ms5_eom                      ~ 194.7 min fit
+[20:08:18] coords: 157,501,580 x 2
+[20:08:18] scoring on: /home/patrick/pure-internship/uv_vae/runs/train_multi_20260802T192756Z/stage1_embed/context.parquet (SigProfiler per cell)
+[gpu] device 47.3 GB total, 45.8 GB free (1.4 GB held by other processes); this stage wants 40.0 GB
+[gpu_budget] cap 40.0 GB of 47.27 GB = torch 4.0 GB (fraction 0.0846) + rmm pool 36.0 GB
+[20:08:18] [1/28] fit500000_mcs250_ms5_eom
+[20:08:18]   fitting HDBSCAN on 500,000 rows (mcs=250, ms=5, eom, eps=0.0)
+[20:08:24]     6.0s, 560 clusters, 10.02% noise on the fit set
+[20:08:24]   labelling all 157,501,580 rows (RBC)
+[20:09:18]     53.9s, 12.42% cohort noise
+[20:09:25]     DBCV 0.1890586063029621 (400 pts/cluster), rel_validity n/a, connectivity 0.999, prob mean 0.758
+[20:09:25]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:09:25]   building SBS96 counts (cached index)
+[20:09:26]   SigProfiler on 560 clusters (137,943,699 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    2.5s
+[Parallel(n_jobs=16)]: Done 194 tasks      | elapsed:    3.1s
+[Parallel(n_jobs=16)]: Done 560 out of 560 | elapsed:    3.5s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:09:30]     cosine mean 0.269, L1% mean 173.8, top-channel median 0.829
+[20:09:30] [2/28] fit500000_mcs500_ms5_eom
+[20:09:30]   fitting HDBSCAN on 500,000 rows (mcs=500, ms=5, eom, eps=0.0)
+[20:09:36]     5.8s, 363 clusters, 8.18% noise on the fit set
+[20:09:36]   labelling all 157,501,580 rows (RBC)
+[20:10:30]     53.4s, 9.12% cohort noise
+[20:10:35]     DBCV 0.24398459450128596 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.782
+[20:10:35]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:10:35]   building SBS96 counts (cached index)
+[20:10:36]   SigProfiler on 363 clusters (143,140,786 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 363 out of 363 | elapsed:    0.2s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:10:36]     cosine mean 0.270, L1% mean 172.5, top-channel median 0.752
+[20:10:36] [3/28] fit500000_mcs1000_ms5_eom
+[20:10:36]   fitting HDBSCAN on 500,000 rows (mcs=1000, ms=5, eom, eps=0.0)
+[20:10:42]     5.8s, 220 clusters, 7.59% noise on the fit set
+[20:10:42]   labelling all 157,501,580 rows (RBC)
+[20:11:36]     53.7s, 7.90% cohort noise
+[20:11:39]     DBCV 0.3994506718435596 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.826
+[20:11:39]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:11:39]   building SBS96 counts (cached index)
+[20:11:40]   SigProfiler on 220 clusters (145,059,863 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 220 out of 220 | elapsed:    0.2s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:11:40]     cosine mean 0.279, L1% mean 170.6, top-channel median 0.675
+[20:11:40] [4/28] fit500000_mcs2500_ms5_eom
+[20:11:40]   fitting HDBSCAN on 500,000 rows (mcs=2500, ms=5, eom, eps=0.0)
+[20:11:46]     5.8s, 88 clusters, 12.35% noise on the fit set
+[20:11:46]   labelling all 157,501,580 rows (RBC)
+[20:12:40]     53.7s, 12.50% cohort noise
+[20:12:42]     DBCV 0.4451308518751905 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.820
+[20:12:42]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:12:42]   building SBS96 counts (cached index)
+[20:12:43]   SigProfiler on 88 clusters (137,806,527 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done  75 out of  88 | elapsed:    0.1s remaining:    0.0s
+[Parallel(n_jobs=16)]: Done  88 out of  88 | elapsed:    0.1s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:12:43]     cosine mean 0.261, L1% mean 170.4, top-channel median 0.570
+[20:12:43] [5/28] fit500000_mcs250_ms15_eom
+[20:12:43]   fitting HDBSCAN on 500,000 rows (mcs=250, ms=15, eom, eps=0.0)
+[20:12:48]     5.3s, 518 clusters, 9.69% noise on the fit set
+[20:12:48]   labelling all 157,501,580 rows (RBC)
+[20:14:30]     101.4s, 10.66% cohort noise
+[20:14:36]     DBCV 0.3286192958739054 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.759
+[20:14:36]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:14:36]   building SBS96 counts (cached index)
+[20:14:37]   SigProfiler on 518 clusters (140,705,084 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 426 tasks      | elapsed:    0.3s
+[Parallel(n_jobs=16)]: Done 518 out of 518 | elapsed:    0.3s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:14:38]     cosine mean 0.277, L1% mean 173.0, top-channel median 0.827
+[20:14:38] [6/28] fit500000_mcs500_ms15_eom
+[20:14:38]   fitting HDBSCAN on 500,000 rows (mcs=500, ms=15, eom, eps=0.0)
+[20:14:43]     5.3s, 348 clusters, 7.72% noise on the fit set
+[20:14:43]   labelling all 157,501,580 rows (RBC)
+[20:16:25]     100.9s, 8.15% cohort noise
+[20:16:29]     DBCV 0.33645730143475777 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.792
+[20:16:29]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:16:29]   building SBS96 counts (cached index)
+[20:16:30]   SigProfiler on 348 clusters (144,668,591 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 258 tasks      | elapsed:    0.2s
+[Parallel(n_jobs=16)]: Done 348 out of 348 | elapsed:    0.3s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:16:31]     cosine mean 0.279, L1% mean 171.9, top-channel median 0.757
+[20:16:31] [7/28] fit500000_mcs1000_ms15_eom
+[20:16:31]   fitting HDBSCAN on 500,000 rows (mcs=1000, ms=15, eom, eps=0.0)
+[20:16:36]     5.3s, 215 clusters, 6.43% noise on the fit set
+[20:16:36]   labelling all 157,501,580 rows (RBC)
+[20:18:17]     100.8s, 6.62% cohort noise
+[20:18:20]     DBCV 0.4156547947443766 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.827
+[20:18:20]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:18:20]   building SBS96 counts (cached index)
+[20:18:21]   SigProfiler on 215 clusters (147,073,359 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 215 out of 215 | elapsed:    0.2s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:18:22]     cosine mean 0.276, L1% mean 170.7, top-channel median 0.672
+[20:18:22] [8/28] fit500000_mcs2500_ms15_eom
+[20:18:22]   fitting HDBSCAN on 500,000 rows (mcs=2500, ms=15, eom, eps=0.0)
+[20:18:27]     5.3s, 89 clusters, 7.24% noise on the fit set
+[20:18:27]   labelling all 157,501,580 rows (RBC)
+[20:20:08]     100.8s, 7.27% cohort noise
+[20:20:09]     DBCV 0.4407456518740483 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.845
+[20:20:09]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:20:09]   building SBS96 counts (cached index)
+[20:20:10]   SigProfiler on 89 clusters (146,048,222 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done  58 out of  89 | elapsed:    0.1s remaining:    0.0s
+[Parallel(n_jobs=16)]: Done  76 out of  89 | elapsed:    0.1s remaining:    0.0s
+[Parallel(n_jobs=16)]: Done  89 out of  89 | elapsed:    0.1s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:20:10]     cosine mean 0.275, L1% mean 168.4, top-channel median 0.549
+[20:20:11] [9/28] fit1000000_mcs250_ms5_eom
+[20:20:11]   fitting HDBSCAN on 1,000,000 rows (mcs=250, ms=5, eom, eps=0.0)
+[20:20:31]     20.3s, 814 clusters, 12.61% noise on the fit set
+[20:20:31]   labelling all 157,501,580 rows (RBC)
+[20:21:41]     69.8s, 16.83% cohort noise
+[20:21:51]     DBCV 0.08810722948745413 (400 pts/cluster), rel_validity n/a, connectivity 0.998, prob mean 0.750
+[20:21:51]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:21:51]   building SBS96 counts (cached index)
+[20:21:53]   SigProfiler on 814 clusters (130,994,689 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 497 tasks      | elapsed:    0.4s
+[Parallel(n_jobs=16)]: Done 814 out of 814 | elapsed:    0.5s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:21:54]     cosine mean 0.256, L1% mean 175.5, top-channel median 0.894
+[20:21:54] [10/28] fit1000000_mcs500_ms5_eom
+[20:21:54]   fitting HDBSCAN on 1,000,000 rows (mcs=500, ms=5, eom, eps=0.0)
+[20:22:14]     20.3s, 584 clusters, 10.29% noise on the fit set
+[20:22:14]   labelling all 157,501,580 rows (RBC)
+[20:23:23]     69.0s, 12.90% cohort noise
+[20:23:31]     DBCV 0.16205387309425676 (400 pts/cluster), rel_validity n/a, connectivity 0.999, prob mean 0.744
+[20:23:31]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:23:31]   building SBS96 counts (cached index)
+[20:23:32]   SigProfiler on 584 clusters (137,189,849 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 440 tasks      | elapsed:    0.3s
+[Parallel(n_jobs=16)]: Done 584 out of 584 | elapsed:    0.4s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:23:33]     cosine mean 0.268, L1% mean 173.9, top-channel median 0.844
+[20:23:33] [11/28] fit1000000_mcs1000_ms5_eom
+[20:23:33]   fitting HDBSCAN on 1,000,000 rows (mcs=1000, ms=5, eom, eps=0.0)
+[20:23:54]     20.3s, 375 clusters, 9.25% noise on the fit set
+[20:23:54]   labelling all 157,501,580 rows (RBC)
+[20:25:02]     68.4s, 10.69% cohort noise
+[20:25:07]     DBCV 0.29668413955281037 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.787
+[20:25:07]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:25:07]   building SBS96 counts (cached index)
+[20:25:08]   SigProfiler on 375 clusters (140,667,787 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 375 out of 375 | elapsed:    0.3s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:25:09]     cosine mean 0.272, L1% mean 172.4, top-channel median 0.757
+[20:25:09] [12/28] fit1000000_mcs2500_ms5_eom
+[20:25:09]   fitting HDBSCAN on 1,000,000 rows (mcs=2500, ms=5, eom, eps=0.0)
+[20:25:29]     20.3s, 176 clusters, 8.00% noise on the fit set
+[20:25:29]   labelling all 157,501,580 rows (RBC)
+[20:26:38]     67.9s, 8.24% cohort noise
+[20:26:40]     DBCV 0.39452649462206024 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.816
+[20:26:40]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:26:40]   building SBS96 counts (cached index)
+[20:26:41]   SigProfiler on 176 clusters (144,521,767 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 145 out of 176 | elapsed:    0.1s remaining:    0.0s
+[Parallel(n_jobs=16)]: Done 176 out of 176 | elapsed:    0.1s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:26:41]     cosine mean 0.281, L1% mean 169.7, top-channel median 0.659
+[20:26:41] [13/28] fit1000000_mcs250_ms15_eom
+[20:26:41]   fitting HDBSCAN on 1,000,000 rows (mcs=250, ms=15, eom, eps=0.0)
+[20:27:00]     18.8s, 735 clusters, 13.22% noise on the fit set
+[20:27:00]   labelling all 157,501,580 rows (RBC)
+[20:29:06]     125.5s, 15.88% cohort noise
+[20:29:15]     DBCV 0.22358966330355462 (400 pts/cluster), rel_validity n/a, connectivity 0.999, prob mean 0.724
+[20:29:15]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:29:15]   building SBS96 counts (cached index)
+[20:29:16]   SigProfiler on 735 clusters (132,493,940 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 419 tasks      | elapsed:    0.3s
+[Parallel(n_jobs=16)]: Done 608 tasks      | elapsed:    0.4s
+[Parallel(n_jobs=16)]: Done 735 out of 735 | elapsed:    0.5s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:29:18]     cosine mean 0.258, L1% mean 175.4, top-channel median 0.897
+[20:29:18] [14/28] fit1000000_mcs500_ms15_eom
+[20:29:18]   fitting HDBSCAN on 1,000,000 rows (mcs=500, ms=15, eom, eps=0.0)
+[20:29:37]     18.8s, 534 clusters, 9.86% noise on the fit set
+[20:29:37]   labelling all 157,501,580 rows (RBC)
+[20:31:42]     124.9s, 10.89% cohort noise
+[20:31:49]     DBCV 0.29748549019591064 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.736
+[20:31:49]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:31:49]   building SBS96 counts (cached index)
+[20:31:50]   SigProfiler on 534 clusters (140,345,459 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 426 tasks      | elapsed:    0.3s
+[Parallel(n_jobs=16)]: Done 534 out of 534 | elapsed:    0.3s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:31:51]     cosine mean 0.275, L1% mean 173.3, top-channel median 0.826
+[20:31:51] [15/28] fit1000000_mcs1000_ms15_eom
+[20:31:51]   fitting HDBSCAN on 1,000,000 rows (mcs=1000, ms=15, eom, eps=0.0)
+[20:32:10]     18.8s, 357 clusters, 7.82% noise on the fit set
+[20:32:10]   labelling all 157,501,580 rows (RBC)
+[20:34:15]     124.5s, 8.31% cohort noise
+[20:34:20]     DBCV 0.34733215048150357 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.785
+[20:34:20]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:34:20]   building SBS96 counts (cached index)
+[20:34:20]   SigProfiler on 357 clusters (144,413,304 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 357 out of 357 | elapsed:    0.2s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:34:21]     cosine mean 0.270, L1% mean 172.6, top-channel median 0.744
+[20:34:21] [16/28] fit1000000_mcs2500_ms15_eom
+[20:34:21]   fitting HDBSCAN on 1,000,000 rows (mcs=2500, ms=15, eom, eps=0.0)
+[20:34:40]     18.8s, 175 clusters, 7.24% noise on the fit set
+[20:34:40]   labelling all 157,501,580 rows (RBC)
+[20:36:44]     124.1s, 7.36% cohort noise
+[20:36:47]     DBCV 0.43130969929049423 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.828
+[20:36:47]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:36:47]   building SBS96 counts (cached index)
+[20:36:48]   SigProfiler on 175 clusters (145,916,931 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 108 out of 175 | elapsed:    0.1s remaining:    0.1s
+[Parallel(n_jobs=16)]: Done 175 out of 175 | elapsed:    0.1s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:36:48]     cosine mean 0.280, L1% mean 169.7, top-channel median 0.653
+[20:36:48] [17/28] fit5000000_mcs250_ms5_eom
+[20:36:49]   fitting HDBSCAN on 5,000,000 rows (mcs=250, ms=5, eom, eps=0.0)
+[20:44:27]     457.9s, 1,096 clusters, 7.94% noise on the fit set
+[20:44:27]   labelling all 157,501,580 rows (RBC)
+[20:47:01]     154.4s, 11.67% cohort noise
+[20:47:16]     DBCV 0.01607309514655881 (400 pts/cluster), rel_validity n/a, connectivity 0.998, prob mean 0.862
+[20:47:16]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:47:16]   building SBS96 counts (cached index)
+[20:47:17]   SigProfiler on 1,096 clusters (139,120,617 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.3s
+[Parallel(n_jobs=16)]: Done 216 tasks      | elapsed:    3.5s
+[Parallel(n_jobs=16)]: Done 1096 out of 1096 | elapsed:    3.9s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:47:22]     cosine mean 0.257, L1% mean 175.5, top-channel median 0.873
+[20:47:22] [18/28] fit5000000_mcs500_ms5_eom
+[20:47:23]   fitting HDBSCAN on 5,000,000 rows (mcs=500, ms=5, eom, eps=0.0)
+[20:54:59]     456.6s, 856 clusters, 7.45% noise on the fit set
+[20:54:59]   labelling all 157,501,580 rows (RBC)
+[20:57:33]     152.9s, 10.63% cohort noise
+[20:57:45]     DBCV 0.06872154786232307 (400 pts/cluster), rel_validity n/a, connectivity 0.999, prob mean 0.855
+[20:57:45]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[20:57:45]   building SBS96 counts (cached index)
+[20:57:46]   SigProfiler on 856 clusters (140,764,196 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.0s
+[Parallel(n_jobs=16)]: Done 216 tasks      | elapsed:    3.4s
+[Parallel(n_jobs=16)]: Done 856 out of 856 | elapsed:    3.7s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[20:57:51]     cosine mean 0.263, L1% mean 174.9, top-channel median 0.864
+[20:57:51] [19/28] fit5000000_mcs1000_ms5_eom
+[20:57:51]   fitting HDBSCAN on 5,000,000 rows (mcs=1000, ms=5, eom, eps=0.0)
+[21:05:29]     457.7s, 692 clusters, 6.72% noise on the fit set
+[21:05:29]   labelling all 157,501,580 rows (RBC)
+[21:08:01]     151.6s, 9.32% cohort noise
+[21:08:11]     DBCV 0.11315308694781108 (400 pts/cluster), rel_validity n/a, connectivity 0.999, prob mean 0.842
+[21:08:11]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[21:08:11]   building SBS96 counts (cached index)
+[21:08:12]   SigProfiler on 692 clusters (142,823,858 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    2.4s
+[Parallel(n_jobs=16)]: Done 190 tasks      | elapsed:    3.2s
+[Parallel(n_jobs=16)]: Done 656 tasks      | elapsed:    3.5s
+[Parallel(n_jobs=16)]: Done 692 out of 692 | elapsed:    3.5s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[21:08:16]     cosine mean 0.263, L1% mean 174.7, top-channel median 0.868
+[21:08:16] [20/28] fit5000000_mcs2500_ms5_eom
+[21:08:17]   fitting HDBSCAN on 5,000,000 rows (mcs=2500, ms=5, eom, eps=0.0)
+[21:15:54]     456.9s, 513 clusters, 6.55% noise on the fit set
+[21:15:54]   labelling all 157,501,580 rows (RBC)
+[21:18:24]     150.3s, 8.77% cohort noise
+[21:18:32]     DBCV 0.20005168395180167 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.839
+[21:18:32]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[21:18:32]   building SBS96 counts (cached index)
+[21:18:33]   SigProfiler on 513 clusters (143,692,925 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.1s
+[Parallel(n_jobs=16)]: Done 216 tasks      | elapsed:    3.4s
+[Parallel(n_jobs=16)]: Done 513 out of 513 | elapsed:    3.5s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[21:18:37]     cosine mean 0.280, L1% mean 172.8, top-channel median 0.812
+[21:18:37] [21/28] fit5000000_mcs250_ms15_eom
+[21:18:38]   fitting HDBSCAN on 5,000,000 rows (mcs=250, ms=15, eom, eps=0.0)
+[21:26:18]     460.1s, 1,330 clusters, 14.04% noise on the fit set
+[21:26:18]   labelling all 157,501,580 rows (RBC)
+[21:31:19]     300.8s, 19.43% cohort noise
+[21:31:37]     DBCV 0.0014723692684132234 (400 pts/cluster), rel_validity n/a, connectivity 0.998, prob mean 0.768
+[21:31:37]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[21:31:37]   building SBS96 counts (cached index)
+[21:31:38]   SigProfiler on 1,330 clusters (126,891,194 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.3s
+[Parallel(n_jobs=16)]: Done 168 tasks      | elapsed:    3.5s
+[Parallel(n_jobs=16)]: Done 1028 tasks      | elapsed:    3.9s
+[Parallel(n_jobs=16)]: Done 1250 tasks      | elapsed:    4.1s
+[Parallel(n_jobs=16)]: Done 1330 out of 1330 | elapsed:    4.2s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[21:31:43]     cosine mean 0.244, L1% mean 176.9, top-channel median 0.917
+[21:31:43] [22/28] fit5000000_mcs500_ms15_eom
+[21:31:44]   fitting HDBSCAN on 5,000,000 rows (mcs=500, ms=15, eom, eps=0.0)
+[21:39:24]     459.8s, 1,008 clusters, 12.70% noise on the fit set
+[21:39:24]   labelling all 157,501,580 rows (RBC)
+[21:44:25]     300.7s, 17.11% cohort noise
+[21:44:40]     DBCV 0.0547015692030264 (400 pts/cluster), rel_validity n/a, connectivity 0.999, prob mean 0.762
+[21:44:40]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[21:44:40]   building SBS96 counts (cached index)
+[21:44:41]   SigProfiler on 1,008 clusters (130,559,723 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.2s
+[Parallel(n_jobs=16)]: Done 216 tasks      | elapsed:    3.4s
+[Parallel(n_jobs=16)]: Done 848 tasks      | elapsed:    3.7s
+[Parallel(n_jobs=16)]: Done 1008 out of 1008 | elapsed:    3.9s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[21:44:45]     cosine mean 0.255, L1% mean 175.9, top-channel median 0.918
+[21:44:45] [23/28] fit5000000_mcs1000_ms15_eom
+[21:44:46]   fitting HDBSCAN on 5,000,000 rows (mcs=1000, ms=15, eom, eps=0.0)
+[21:52:26]     459.8s, 784 clusters, 11.10% noise on the fit set
+[21:52:26]   labelling all 157,501,580 rows (RBC)
+[21:57:24]     298.0s, 14.39% cohort noise
+[21:57:36]     DBCV 0.12602090345046255 (400 pts/cluster), rel_validity n/a, connectivity 0.999, prob mean 0.759
+[21:57:36]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[21:57:36]   building SBS96 counts (cached index)
+[21:57:37]   SigProfiler on 784 clusters (134,835,241 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.2s
+[Parallel(n_jobs=16)]: Done 216 tasks      | elapsed:    3.4s
+[Parallel(n_jobs=16)]: Done 784 out of 784 | elapsed:    3.7s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[21:57:41]     cosine mean 0.260, L1% mean 175.1, top-channel median 0.908
+[21:57:41] [24/28] fit5000000_mcs2500_ms15_eom
+[21:57:42]   fitting HDBSCAN on 5,000,000 rows (mcs=2500, ms=15, eom, eps=0.0)
+[22:05:21]     459.7s, 548 clusters, 9.34% noise on the fit set
+[22:05:21]   labelling all 157,501,580 rows (RBC)
+[22:10:19]     297.0s, 11.25% cohort noise
+[22:10:27]     DBCV 0.19738777111476113 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.771
+[22:10:27]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[22:10:27]   building SBS96 counts (cached index)
+[22:10:28]   SigProfiler on 548 clusters (139,775,150 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.1s
+[Parallel(n_jobs=16)]: Done 216 tasks      | elapsed:    3.3s
+[Parallel(n_jobs=16)]: Done 548 out of 548 | elapsed:    3.5s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[22:10:32]     cosine mean 0.275, L1% mean 173.2, top-channel median 0.826
+[22:10:32] [25/28] fit25000000_mcs250_ms5_eom
+[22:10:34]   fitting HDBSCAN on 25,000,000 rows (mcs=250, ms=5, eom, eps=0.0)
+[01:24:46]     11651.7s, 872 clusters, 2.93% noise on the fit set
+[01:24:46]   labelling all 157,501,580 rows (RBC)
+[01:31:33]     406.4s, 3.97% cohort noise
+[01:31:51]     DBCV 0.05959473107686527 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.955
+[01:31:51]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[01:31:51]   building SBS96 counts (cached index)
+[01:31:51]   SigProfiler on 872 clusters (151,243,008 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.2s
+[Parallel(n_jobs=16)]: Done 216 tasks      | elapsed:    3.4s
+[Parallel(n_jobs=16)]: Done 872 out of 872 | elapsed:    3.8s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[01:31:56]     cosine mean 0.317, L1% mean 169.8, top-channel median 0.777
+[01:31:56] [26/28] fit25000000_mcs500_ms5_eom
+[01:31:58]   fitting HDBSCAN on 25,000,000 rows (mcs=500, ms=5, eom, eps=0.0)
+[04:45:38]     11619.5s, 634 clusters, 2.69% noise on the fit set
+[04:45:38]   labelling all 157,501,580 rows (RBC)
+[04:52:21]     403.1s, 3.64% cohort noise
+[04:52:36]     DBCV 0.1589336509775593 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.951
+[04:52:36]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[04:52:36]   building SBS96 counts (cached index)
+[04:52:37]   SigProfiler on 634 clusters (151,761,991 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.2s
+[Parallel(n_jobs=16)]: Done 216 tasks      | elapsed:    3.4s
+[Parallel(n_jobs=16)]: Done 634 out of 634 | elapsed:    3.7s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[04:52:41]     cosine mean 0.305, L1% mean 170.8, top-channel median 0.808
+[04:52:41] [27/28] fit25000000_mcs1000_ms5_eom
+[04:52:43]   fitting HDBSCAN on 25,000,000 rows (mcs=1000, ms=5, eom, eps=0.0)
+[08:06:42]     11638.1s, 517 clusters, 2.52% noise on the fit set
+[08:06:42]   labelling all 157,501,580 rows (RBC)
+[08:13:34]     411.6s, 3.38% cohort noise
+[08:13:47]     DBCV 0.18625923711311046 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.948
+[08:13:47]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[08:13:47]   building SBS96 counts (cached index)
+[08:13:48]   SigProfiler on 517 clusters (152,172,324 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.2s
+[Parallel(n_jobs=16)]: Done 216 tasks      | elapsed:    3.4s
+[Parallel(n_jobs=16)]: Done 517 out of 517 | elapsed:    3.6s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[08:13:52]     cosine mean 0.300, L1% mean 170.8, top-channel median 0.809
+[08:13:52] [28/28] fit25000000_mcs2500_ms5_eom
+[08:13:54]   fitting HDBSCAN on 25,000,000 rows (mcs=2500, ms=5, eom, eps=0.0)
+[11:28:14]     11659.6s, 441 clusters, 2.39% noise on the fit set
+[11:28:14]   labelling all 157,501,580 rows (RBC)
+[11:34:53]     399.4s, 3.19% cohort noise
+[11:35:06]     DBCV 0.22658774780749258 (400 pts/cluster), rel_validity n/a, connectivity 1.000, prob mean 0.946
+[11:35:06]     saved cluster_persistence; unavailable: outlier_scores_, exemplars_
+[11:35:06]   building SBS96 counts (cached index)
+[11:35:07]   SigProfiler on 441 clusters (152,481,214 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.3s
+[Parallel(n_jobs=16)]: Done 168 tasks      | elapsed:    3.4s
+[Parallel(n_jobs=16)]: Done 441 out of 441 | elapsed:    3.6s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[11:35:11]     cosine mean 0.303, L1% mean 170.6, top-channel median 0.785
+shape: (28, 23)
+┌─────────────────────────┬──────────┬──────┬─────┬────────┬─────┬────────────┬───────────┬──────────┬────────┬────────┬──────────┬─────────┬───────────┬──────────┬─────────┬──────────┬───────────┬──────────┬──────────┬──────────┬─────────┬─────────┐
+│ label                   ┆ fit_rows ┆ mcs  ┆ ms  ┆ method ┆ eps ┆ n_clusters ┆ noise_pct ┆ top_chan ┆ tc>0.5 ┆ tc>0.8 ┆ dbcv     ┆ connect ┆ prob_mean ┆ prob>0.8 ┆ persist ┆ cos_mean ┆ cos_wmean ┆ l1%_mean ┆ l2%_mean ┆ mut%>0.8 ┆ fit_s   ┆ label_s │
+│ ---                     ┆ ---      ┆ ---  ┆ --- ┆ ---    ┆ --- ┆ ---        ┆ ---       ┆ ---      ┆ ---    ┆ ---    ┆ ---      ┆ ---     ┆ ---       ┆ ---      ┆ ---     ┆ ---      ┆ ---       ┆ ---      ┆ ---      ┆ ---      ┆ ---     ┆ ---     │
+│ str                     ┆ i64      ┆ i64  ┆ i64 ┆ str    ┆ f64 ┆ i64        ┆ f64       ┆ f64      ┆ f64    ┆ f64    ┆ f64      ┆ f64     ┆ f64       ┆ f64      ┆ f64     ┆ f64      ┆ f64       ┆ f64      ┆ f64      ┆ f64      ┆ f64     ┆ f64     │
+╞═════════════════════════╪══════════╪══════╪═════╪════════╪═════╪════════════╪═══════════╪══════════╪════════╪════════╪══════════╪═════════╪═══════════╪══════════╪═════════╪══════════╪═══════════╪══════════╪══════════╪══════════╪═════════╪═════════╡
+│ fit500000_mcs2500_ms15_ ┆ 500000   ┆ 2500 ┆ 15  ┆ eom    ┆ 0.0 ┆ 89         ┆ 7.27      ┆ 0.549    ┆ 0.629  ┆ 0.135  ┆ 0.440746 ┆ 1.0     ┆ 0.845     ┆ 0.735    ┆ 0.2252  ┆ 0.2749   ┆ 0.2844    ┆ 168.39   ┆ 103.07   ┆ 0.0      ┆ 5.3     ┆ 100.8   │
+│ eom                     ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit500000_mcs2500_ms5_e ┆ 500000   ┆ 2500 ┆ 5   ┆ eom    ┆ 0.0 ┆ 88         ┆ 12.5      ┆ 0.57     ┆ 0.614  ┆ 0.148  ┆ 0.445131 ┆ 1.0     ┆ 0.82      ┆ 0.704    ┆ 0.2149  ┆ 0.2613   ┆ 0.2665    ┆ 170.38   ┆ 104.28   ┆ 0.9      ┆ 5.8     ┆ 53.7    │
+│ om                      ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit1000000_mcs2500_ms15 ┆ 1000000  ┆ 2500 ┆ 15  ┆ eom    ┆ 0.0 ┆ 175        ┆ 7.36      ┆ 0.653    ┆ 0.663  ┆ 0.274  ┆ 0.43131  ┆ 1.0     ┆ 0.828     ┆ 0.722    ┆ 1.0     ┆ 0.2804   ┆ 0.2774    ┆ 169.73   ┆ 100.91   ┆ 1.4      ┆ 18.8    ┆ 124.1   │
+│ _eom                    ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit1000000_mcs2500_ms5_ ┆ 1000000  ┆ 2500 ┆ 5   ┆ eom    ┆ 0.0 ┆ 176        ┆ 8.24      ┆ 0.659    ┆ 0.67   ┆ 0.267  ┆ 0.394526 ┆ 1.0     ┆ 0.816     ┆ 0.722    ┆ 1.0     ┆ 0.2806   ┆ 0.2756    ┆ 169.72   ┆ 101.09   ┆ 1.4      ┆ 20.3    ┆ 67.9    │
+│ eom                     ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit500000_mcs1000_ms15_ ┆ 500000   ┆ 1000 ┆ 15  ┆ eom    ┆ 0.0 ┆ 215        ┆ 6.62      ┆ 0.672    ┆ 0.712  ┆ 0.316  ┆ 0.415655 ┆ 1.0     ┆ 0.827     ┆ 0.703    ┆ 1.0     ┆ 0.2757   ┆ 0.2718    ┆ 170.72   ┆ 100.32   ┆ 1.6      ┆ 5.3     ┆ 100.8   │
+│ eom                     ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit500000_mcs1000_ms5_e ┆ 500000   ┆ 1000 ┆ 5   ┆ eom    ┆ 0.0 ┆ 220        ┆ 7.9       ┆ 0.675    ┆ 0.727  ┆ 0.323  ┆ 0.399451 ┆ 1.0     ┆ 0.826     ┆ 0.713    ┆ 1.0     ┆ 0.2787   ┆ 0.2708    ┆ 170.62   ┆ 100.1    ┆ 1.7      ┆ 5.8     ┆ 53.7    │
+│ om                      ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit1000000_mcs1000_ms15 ┆ 1000000  ┆ 1000 ┆ 15  ┆ eom    ┆ 0.0 ┆ 357        ┆ 8.31      ┆ 0.744    ┆ 0.798  ┆ 0.429  ┆ 0.347332 ┆ 1.0     ┆ 0.785     ┆ 0.661    ┆ 1.0     ┆ 0.27     ┆ 0.2657    ┆ 172.64   ┆ 99.84    ┆ 1.9      ┆ 18.8    ┆ 124.5   │
+│ _eom                    ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit500000_mcs500_ms5_eo ┆ 500000   ┆ 500  ┆ 5   ┆ eom    ┆ 0.0 ┆ 363        ┆ 9.12      ┆ 0.752    ┆ 0.793  ┆ 0.424  ┆ 0.243985 ┆ 1.0     ┆ 0.782     ┆ 0.676    ┆ 1.0     ┆ 0.27     ┆ 0.2625    ┆ 172.55   ┆ 100.06   ┆ 2.0      ┆ 5.8     ┆ 53.4    │
+│ m                       ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit1000000_mcs1000_ms5_ ┆ 1000000  ┆ 1000 ┆ 5   ┆ eom    ┆ 0.0 ┆ 375        ┆ 10.69     ┆ 0.757    ┆ 0.811  ┆ 0.435  ┆ 0.296684 ┆ 1.0     ┆ 0.787     ┆ 0.699    ┆ 1.0     ┆ 0.2725   ┆ 0.2629    ┆ 172.38   ┆ 99.59    ┆ 2.0      ┆ 20.3    ┆ 68.4    │
+│ eom                     ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit500000_mcs500_ms15_e ┆ 500000   ┆ 500  ┆ 15  ┆ eom    ┆ 0.0 ┆ 348        ┆ 8.15      ┆ 0.757    ┆ 0.799  ┆ 0.445  ┆ 0.336457 ┆ 1.0     ┆ 0.792     ┆ 0.65     ┆ 1.0     ┆ 0.279    ┆ 0.2646    ┆ 171.87   ┆ 99.51    ┆ 2.0      ┆ 5.3     ┆ 100.9   │
+│ om                      ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit25000000_mcs250_ms5_ ┆ 25000000 ┆ 250  ┆ 5   ┆ eom    ┆ 0.0 ┆ 872        ┆ 3.97      ┆ 0.777    ┆ 0.804  ┆ 0.475  ┆ 0.059595 ┆ 1.0     ┆ 0.955     ┆ 0.955    ┆ 1.0     ┆ 0.3172   ┆ 0.2625    ┆ 169.81   ┆ 98.06    ┆ 1.3      ┆ 11651.7 ┆ 406.4   │
+│ eom                     ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit25000000_mcs2500_ms5 ┆ 25000000 ┆ 2500 ┆ 5   ┆ eom    ┆ 0.0 ┆ 441        ┆ 3.19      ┆ 0.785    ┆ 0.819  ┆ 0.49   ┆ 0.226588 ┆ 1.0     ┆ 0.946     ┆ 0.945    ┆ 1.0     ┆ 0.3031   ┆ 0.2646    ┆ 170.56   ┆ 97.88    ┆ 1.3      ┆ 11659.6 ┆ 399.4   │
+│ _eom                    ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit25000000_mcs500_ms5_ ┆ 25000000 ┆ 500  ┆ 5   ┆ eom    ┆ 0.0 ┆ 634        ┆ 3.64      ┆ 0.808    ┆ 0.826  ┆ 0.508  ┆ 0.158934 ┆ 1.0     ┆ 0.951     ┆ 0.95     ┆ 1.0     ┆ 0.305    ┆ 0.2629    ┆ 170.77   ┆ 97.75    ┆ 1.4      ┆ 11619.5 ┆ 403.1   │
+│ eom                     ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit25000000_mcs1000_ms5 ┆ 25000000 ┆ 1000 ┆ 5   ┆ eom    ┆ 0.0 ┆ 517        ┆ 3.38      ┆ 0.809    ┆ 0.822  ┆ 0.509  ┆ 0.186259 ┆ 1.0     ┆ 0.948     ┆ 0.947    ┆ 1.0     ┆ 0.2996   ┆ 0.2636    ┆ 170.83   ┆ 97.84    ┆ 1.4      ┆ 11638.1 ┆ 411.6   │
+│ _eom                    ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit5000000_mcs2500_ms5_ ┆ 5000000  ┆ 2500 ┆ 5   ┆ eom    ┆ 0.0 ┆ 513        ┆ 8.77      ┆ 0.812    ┆ 0.836  ┆ 0.511  ┆ 0.200052 ┆ 1.0     ┆ 0.839     ┆ 0.826    ┆ 1.0     ┆ 0.2798   ┆ 0.2607    ┆ 172.78   ┆ 98.27    ┆ 2.3      ┆ 456.9   ┆ 150.3   │
+│ eom                     ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit1000000_mcs500_ms15_ ┆ 1000000  ┆ 500  ┆ 15  ┆ eom    ┆ 0.0 ┆ 534        ┆ 10.89     ┆ 0.826    ┆ 0.843  ┆ 0.53   ┆ 0.297485 ┆ 1.0     ┆ 0.736     ┆ 0.613    ┆ 1.0     ┆ 0.2752   ┆ 0.2618    ┆ 173.26   ┆ 98.41    ┆ 2.0      ┆ 18.8    ┆ 124.9   │
+│ eom                     ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit5000000_mcs2500_ms15 ┆ 5000000  ┆ 2500 ┆ 15  ┆ eom    ┆ 0.0 ┆ 548        ┆ 11.25     ┆ 0.826    ┆ 0.847  ┆ 0.529  ┆ 0.197388 ┆ 1.0     ┆ 0.771     ┆ 0.732    ┆ 1.0     ┆ 0.275    ┆ 0.2605    ┆ 173.25   ┆ 98.33    ┆ 2.1      ┆ 459.7   ┆ 297.0   │
+│ _eom                    ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit500000_mcs250_ms15_e ┆ 500000   ┆ 250  ┆ 15  ┆ eom    ┆ 0.0 ┆ 518        ┆ 10.66     ┆ 0.827    ┆ 0.844  ┆ 0.531  ┆ 0.328619 ┆ 1.0     ┆ 0.759     ┆ 0.607    ┆ 1.0     ┆ 0.2771   ┆ 0.2628    ┆ 173.0    ┆ 98.4     ┆ 2.0      ┆ 5.3     ┆ 101.4   │
+│ om                      ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit500000_mcs250_ms5_eo ┆ 500000   ┆ 250  ┆ 5   ┆ eom    ┆ 0.0 ┆ 560        ┆ 12.42     ┆ 0.829    ┆ 0.841  ┆ 0.541  ┆ 0.189059 ┆ 0.999   ┆ 0.758     ┆ 0.655    ┆ 1.0     ┆ 0.2689   ┆ 0.2629    ┆ 173.82   ┆ 98.65    ┆ 2.2      ┆ 6.0     ┆ 53.9    │
+│ m                       ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit1000000_mcs500_ms5_e ┆ 1000000  ┆ 500  ┆ 5   ┆ eom    ┆ 0.0 ┆ 584        ┆ 12.9      ┆ 0.844    ┆ 0.846  ┆ 0.548  ┆ 0.162054 ┆ 0.999   ┆ 0.744     ┆ 0.682    ┆ 1.0     ┆ 0.2684   ┆ 0.2619    ┆ 173.93   ┆ 98.64    ┆ 2.4      ┆ 20.3    ┆ 69.0    │
+│ om                      ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit5000000_mcs500_ms5_e ┆ 5000000  ┆ 500  ┆ 5   ┆ eom    ┆ 0.0 ┆ 856        ┆ 10.63     ┆ 0.864    ┆ 0.848  ┆ 0.572  ┆ 0.068722 ┆ 0.999   ┆ 0.855     ┆ 0.845    ┆ 1.0     ┆ 0.2628   ┆ 0.2576    ┆ 174.87   ┆ 98.62    ┆ 2.3      ┆ 456.6   ┆ 152.9   │
+│ om                      ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit5000000_mcs1000_ms5_ ┆ 5000000  ┆ 1000 ┆ 5   ┆ eom    ┆ 0.0 ┆ 692        ┆ 9.32      ┆ 0.868    ┆ 0.847  ┆ 0.564  ┆ 0.113153 ┆ 0.999   ┆ 0.842     ┆ 0.833    ┆ 1.0     ┆ 0.2631   ┆ 0.2588    ┆ 174.71   ┆ 98.73    ┆ 2.3      ┆ 457.7   ┆ 151.6   │
+│ eom                     ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit5000000_mcs250_ms5_e ┆ 5000000  ┆ 250  ┆ 5   ┆ eom    ┆ 0.0 ┆ 1096       ┆ 11.67     ┆ 0.873    ┆ 0.854  ┆ 0.574  ┆ 0.016073 ┆ 0.998   ┆ 0.862     ┆ 0.853    ┆ 1.0     ┆ 0.2569   ┆ 0.2567    ┆ 175.49   ┆ 99.06    ┆ 2.2      ┆ 457.9   ┆ 154.4   │
+│ om                      ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit1000000_mcs250_ms5_e ┆ 1000000  ┆ 250  ┆ 5   ┆ eom    ┆ 0.0 ┆ 814        ┆ 16.83     ┆ 0.894    ┆ 0.861  ┆ 0.607  ┆ 0.088107 ┆ 0.998   ┆ 0.75      ┆ 0.697    ┆ 1.0     ┆ 0.256    ┆ 0.2579    ┆ 175.5    ┆ 98.71    ┆ 2.1      ┆ 20.3    ┆ 69.8    │
+│ om                      ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit1000000_mcs250_ms15_ ┆ 1000000  ┆ 250  ┆ 15  ┆ eom    ┆ 0.0 ┆ 735        ┆ 15.88     ┆ 0.897    ┆ 0.879  ┆ 0.614  ┆ 0.22359  ┆ 0.999   ┆ 0.724     ┆ 0.608    ┆ 1.0     ┆ 0.2579   ┆ 0.2626    ┆ 175.45   ┆ 98.6     ┆ 2.5      ┆ 18.8    ┆ 125.5   │
+│ eom                     ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit5000000_mcs1000_ms15 ┆ 5000000  ┆ 1000 ┆ 15  ┆ eom    ┆ 0.0 ┆ 784        ┆ 14.39     ┆ 0.908    ┆ 0.867  ┆ 0.617  ┆ 0.126021 ┆ 0.999   ┆ 0.759     ┆ 0.726    ┆ 1.0     ┆ 0.2599   ┆ 0.2604    ┆ 175.1    ┆ 98.44    ┆ 2.6      ┆ 459.8   ┆ 298.0   │
+│ _eom                    ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit5000000_mcs250_ms15_ ┆ 5000000  ┆ 250  ┆ 15  ┆ eom    ┆ 0.0 ┆ 1330       ┆ 19.43     ┆ 0.917    ┆ 0.876  ┆ 0.632  ┆ 0.001472 ┆ 0.998   ┆ 0.768     ┆ 0.742    ┆ 1.0     ┆ 0.2443   ┆ 0.2611    ┆ 176.92   ┆ 99.2     ┆ 2.6      ┆ 460.1   ┆ 300.8   │
+│ eom                     ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+│ fit5000000_mcs500_ms15_ ┆ 5000000  ┆ 500  ┆ 15  ┆ eom    ┆ 0.0 ┆ 1008       ┆ 17.11     ┆ 0.918    ┆ 0.873  ┆ 0.631  ┆ 0.054702 ┆ 0.999   ┆ 0.762     ┆ 0.731    ┆ 1.0     ┆ 0.2548   ┆ 0.2609    ┆ 175.88   ┆ 98.49    ┆ 2.6      ┆ 459.8   ┆ 300.7   │
+│ eom                     ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆         ┆         │
+└─────────────────────────┴──────────┴──────┴─────┴────────┴─────┴────────────┴───────────┴──────────┴────────┴────────┴──────────┴─────────┴───────────┴──────────┴─────────┴──────────┴───────────┴──────────┴──────────┴──────────┴─────────┴─────────┘
+[11:35:11] done
+[14:35:14] === PASS 1 VERIFY: compare against the original sweep ===
+fit1000000_mcs1000_ms15_eom                IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 357/357  noise 8.31/8.31%
+fit1000000_mcs1000_ms5_eom                 IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 375/375  noise 10.69/10.69%
+fit1000000_mcs2500_ms15_eom                IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 175/175  noise 7.36/7.36%
+fit1000000_mcs2500_ms5_eom                 IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 176/176  noise 8.24/8.24%
+fit1000000_mcs250_ms15_eom                 IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 735/735  noise 15.88/15.88%
+fit1000000_mcs250_ms5_eom                  IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 814/814  noise 16.83/16.83%
+fit1000000_mcs500_ms15_eom                 IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 534/534  noise 10.89/10.89%
+fit1000000_mcs500_ms5_eom                  IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 584/584  noise 12.90/12.90%
+fit25000000_mcs1000_ms5_eom                IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 517/517  noise 3.38/3.38%
+fit25000000_mcs2500_ms5_eom                IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 441/441  noise 3.19/3.19%
+fit25000000_mcs250_ms5_eom                 IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 872/872  noise 3.97/3.97%
+fit25000000_mcs500_ms5_eom                 IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 634/634  noise 3.64/3.64%
+fit5000000_mcs1000_ms15_eom                IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 784/784  noise 14.39/14.39%
+fit5000000_mcs1000_ms5_eom                 IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 692/692  noise 9.32/9.32%
+fit5000000_mcs2500_ms15_eom                IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 548/548  noise 11.25/11.25%
+fit5000000_mcs2500_ms5_eom                 IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 513/513  noise 8.77/8.77%
+fit5000000_mcs250_ms15_eom                 IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 1330/1330  noise 19.43/19.43%
+fit5000000_mcs250_ms5_eom                  IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 1096/1096  noise 11.67/11.67%
+fit5000000_mcs500_ms15_eom                 IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 1008/1008  noise 17.11/17.11%
+fit5000000_mcs500_ms5_eom                  IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 856/856  noise 10.63/10.63%
+fit500000_mcs1000_ms15_eom                 IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 215/215  noise 6.62/6.62%
+fit500000_mcs1000_ms5_eom                  IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 220/220  noise 7.90/7.90%
+fit500000_mcs2500_ms15_eom                 IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 89/89  noise 7.27/7.27%
+fit500000_mcs2500_ms5_eom                  IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 88/88  noise 12.50/12.50%
+fit500000_mcs250_ms15_eom                  IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 518/518  noise 10.66/10.66%
+fit500000_mcs250_ms5_eom                   IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 560/560  noise 12.42/12.42%
+fit500000_mcs500_ms15_eom                  IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 348/348  noise 8.15/8.15%
+fit500000_mcs500_ms5_eom                   IDENTICAL                    ARI 1.000000  diff 0.0000%  clusters 363/363  noise 9.12/9.12%
+
+report -> /home/patrick/refit_check.json
+compare_cells.py exit code: 0  (0 = all IDENTICAL/SAME PARTITION)
+[14:36:01] === PASS 2: CPU artefacts (500K-5M only -- 25M CPU cost/OOM unverified) ===
+[14:36:01] HDBSCAN parameter sweep
+  coords        : /home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests/hdbscan_scaling/coords.npy
+  context       : /home/patrick/pure-internship/uv_vae/runs/train_multi_20260802T192756Z/stage1_embed/context.parquet
+  output        : /home/patrick/pure-internship/umap_hdbscan_sweep/umap_tests/param_sweep_refit_cpu
+  fit sizes     : 500000,1000000,5000000
+  mcs (fixed)   : 250,500,1000,2500
+  min_samples   : 5,15
+  cluster fit   : cpu   (cpu = real persistence/exemplars/outliers, else cuML degenerate)
+  dbcv backend  : auto, 400 pts/cluster
+
+memory.used [MiB], memory.total [MiB]
+89 MiB, 48935 MiB
+
+[gpu_budget] cap 16.0 GB of 47.27 GB = torch 12.0 GB (fraction 0.2539) + rmm pool 4.0 GB
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1786707365.612557 1496017 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+I0000 00:00:1786707365.646426 1496017 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI AVX512_BF16 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1786707366.319865 1496017 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+[11:36:07] building SBS96 index over 157,501,580 rows (one-off, cached)
+[11:36:45]   100.00% of rows carry an SBS96 context
+[11:36:45] grid: 24 cells, 0 already done, 24 to run
+[11:36:45] projected: 1.2 h fitting + 2.9 h labelling/scoring = 4.1 h total
+[11:36:45]     fit500000_mcs250_ms5_eom                         ~   0.1 min fit
+[11:36:45]     fit500000_mcs500_ms5_eom                         ~   0.1 min fit
+[11:36:45]     fit500000_mcs1000_ms5_eom                        ~   0.1 min fit
+[11:36:45]     fit500000_mcs2500_ms5_eom                        ~   0.1 min fit
+[11:36:45]     fit500000_mcs250_ms15_eom                        ~   0.1 min fit
+[11:36:45]     fit500000_mcs500_ms15_eom                        ~   0.1 min fit
+[11:36:45]     fit500000_mcs1000_ms15_eom                       ~   0.1 min fit
+[11:36:45]     fit500000_mcs2500_ms15_eom                       ~   0.1 min fit
+[11:36:45]     fit1000000_mcs250_ms5_eom                        ~   0.4 min fit
+[11:36:45]     fit1000000_mcs500_ms5_eom                        ~   0.4 min fit
+[11:36:45]     fit1000000_mcs1000_ms5_eom                       ~   0.4 min fit
+[11:36:45]     fit1000000_mcs2500_ms5_eom                       ~   0.4 min fit
+[11:36:45]     fit1000000_mcs250_ms15_eom                       ~   0.5 min fit
+[11:36:45]     fit1000000_mcs500_ms15_eom                       ~   0.5 min fit
+[11:36:45]     fit1000000_mcs1000_ms15_eom                      ~   0.5 min fit
+[11:36:45]     fit1000000_mcs2500_ms15_eom                      ~   0.5 min fit
+[11:36:45]     fit5000000_mcs250_ms5_eom                        ~   7.8 min fit
+[11:36:45]     fit5000000_mcs500_ms5_eom                        ~   7.8 min fit
+[11:36:45]     fit5000000_mcs1000_ms5_eom                       ~   7.8 min fit
+[11:36:45]     fit5000000_mcs2500_ms5_eom                       ~   7.8 min fit
+[11:36:45]     fit5000000_mcs250_ms15_eom                       ~   9.4 min fit
+[11:36:45]     fit5000000_mcs500_ms15_eom                       ~   9.4 min fit
+[11:36:45]     fit5000000_mcs1000_ms15_eom                      ~   9.4 min fit
+[11:36:45]     fit5000000_mcs2500_ms15_eom                      ~   9.4 min fit
+[11:36:45] coords: 157,501,580 x 2
+[11:36:45] scoring on: /home/patrick/pure-internship/uv_vae/runs/train_multi_20260802T192756Z/stage1_embed/context.parquet (SigProfiler per cell)
+[gpu] device 47.3 GB total, 45.8 GB free (1.4 GB held by other processes); this stage wants 40.0 GB
+[gpu_budget] cap 40.0 GB of 47.27 GB = torch 4.0 GB (fraction 0.0846) + rmm pool 36.0 GB
+[11:36:45] [1/24] fit500000_mcs250_ms5_eom
+[11:36:45]   fitting HDBSCAN on 500,000 rows (mcs=250, ms=5, eom, eps=0.0)
+[11:36:52]     6.0s, 560 clusters, 10.02% noise on the fit set
+[11:36:52]   labelling all 157,501,580 rows (RBC)
+[11:37:46]     54.0s, 12.42% cohort noise
+[11:37:53]     DBCV 0.1890586063029621 (400 pts/cluster), rel_validity 0.2935, connectivity 0.999, prob mean 0.758
+[11:37:54]     saved cluster_persistence, outlier_scores, exemplars
+[11:37:54]   building SBS96 counts (cached index)
+[11:37:55]   SigProfiler on 560 clusters (137,943,699 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    2.3s
+[Parallel(n_jobs=16)]: Done 178 tasks      | elapsed:    3.1s
+[Parallel(n_jobs=16)]: Done 560 out of 560 | elapsed:    3.6s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[11:37:59]     cosine mean 0.269, L1% mean 173.8, top-channel median 0.829
+[11:37:59] [2/24] fit500000_mcs500_ms5_eom
+[11:37:59]   fitting HDBSCAN on 500,000 rows (mcs=500, ms=5, eom, eps=0.0)
+[11:38:06]     5.8s, 363 clusters, 8.18% noise on the fit set
+[11:38:06]   labelling all 157,501,580 rows (RBC)
+[11:38:59]     53.1s, 9.12% cohort noise
+[11:39:04]     DBCV 0.24398459450128596 (400 pts/cluster), rel_validity 0.2994, connectivity 1.000, prob mean 0.782
+[11:39:04]     saved cluster_persistence, outlier_scores, exemplars
+[11:39:04]   building SBS96 counts (cached index)
+[11:39:05]   SigProfiler on 363 clusters (143,140,786 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 259 out of 363 | elapsed:    0.2s remaining:    0.1s
+[Parallel(n_jobs=16)]: Done 363 out of 363 | elapsed:    0.3s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[11:39:06]     cosine mean 0.270, L1% mean 172.5, top-channel median 0.752
+[11:39:06] [3/24] fit500000_mcs1000_ms5_eom
+[11:39:06]   fitting HDBSCAN on 500,000 rows (mcs=1000, ms=5, eom, eps=0.0)
+[11:39:13]     5.9s, 220 clusters, 7.59% noise on the fit set
+[11:39:13]   labelling all 157,501,580 rows (RBC)
+[11:40:06]     53.0s, 7.90% cohort noise
+[11:40:09]     DBCV 0.3994506718435596 (400 pts/cluster), rel_validity 0.3348, connectivity 1.000, prob mean 0.826
+[11:40:09]     saved cluster_persistence, outlier_scores, exemplars
+[11:40:10]   building SBS96 counts (cached index)
+[11:40:10]   SigProfiler on 220 clusters (145,059,863 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 220 out of 220 | elapsed:    0.2s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[11:40:11]     cosine mean 0.279, L1% mean 170.6, top-channel median 0.675
+[11:40:11] [4/24] fit500000_mcs2500_ms5_eom
+[11:40:11]   fitting HDBSCAN on 500,000 rows (mcs=2500, ms=5, eom, eps=0.0)
+[11:40:17]     5.8s, 88 clusters, 12.35% noise on the fit set
+[11:40:17]   labelling all 157,501,580 rows (RBC)
+[11:41:11]     53.1s, 12.50% cohort noise
+[11:41:12]     DBCV 0.4451308518751905 (400 pts/cluster), rel_validity 0.3457, connectivity 1.000, prob mean 0.820
+[11:41:13]     saved cluster_persistence, outlier_scores, exemplars
+[11:41:13]   building SBS96 counts (cached index)
+[11:41:14]   SigProfiler on 88 clusters (137,806,527 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done  57 out of  88 | elapsed:    0.1s remaining:    0.0s
+[Parallel(n_jobs=16)]: Done  75 out of  88 | elapsed:    0.1s remaining:    0.0s
+[Parallel(n_jobs=16)]: Done  88 out of  88 | elapsed:    0.1s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[11:41:14]     cosine mean 0.261, L1% mean 170.4, top-channel median 0.570
+[11:41:14] [5/24] fit500000_mcs250_ms15_eom
+[11:41:14]   fitting HDBSCAN on 500,000 rows (mcs=250, ms=15, eom, eps=0.0)
+[11:41:20]     5.4s, 518 clusters, 9.69% noise on the fit set
+[11:41:20]   labelling all 157,501,580 rows (RBC)
+[11:43:01]     100.0s, 10.66% cohort noise
+[11:43:07]     DBCV 0.3286192958739054 (400 pts/cluster), rel_validity 0.3176, connectivity 1.000, prob mean 0.759
+[11:43:08]     saved cluster_persistence, outlier_scores, exemplars
+[11:43:08]   building SBS96 counts (cached index)
+[11:43:09]   SigProfiler on 518 clusters (140,705,084 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 412 tasks      | elapsed:    0.3s
+[Parallel(n_jobs=16)]: Done 487 out of 518 | elapsed:    0.3s remaining:    0.0s
+[Parallel(n_jobs=16)]: Done 518 out of 518 | elapsed:    0.3s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[11:43:10]     cosine mean 0.277, L1% mean 173.0, top-channel median 0.827
+[11:43:10] [6/24] fit500000_mcs500_ms15_eom
+[11:43:10]   fitting HDBSCAN on 500,000 rows (mcs=500, ms=15, eom, eps=0.0)
+[11:43:16]     5.3s, 348 clusters, 7.72% noise on the fit set
+[11:43:16]   labelling all 157,501,580 rows (RBC)
+[11:44:56]     99.4s, 8.15% cohort noise
+[11:45:01]     DBCV 0.33645730143475777 (400 pts/cluster), rel_validity 0.2963, connectivity 1.000, prob mean 0.792
+[11:45:01]     saved cluster_persistence, outlier_scores, exemplars
+[11:45:01]   building SBS96 counts (cached index)
+[11:45:02]   SigProfiler on 348 clusters (144,668,591 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 258 tasks      | elapsed:    0.2s
+[Parallel(n_jobs=16)]: Done 348 out of 348 | elapsed:    0.3s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[11:45:03]     cosine mean 0.279, L1% mean 171.9, top-channel median 0.757
+[11:45:03] [7/24] fit500000_mcs1000_ms15_eom
+[11:45:03]   fitting HDBSCAN on 500,000 rows (mcs=1000, ms=15, eom, eps=0.0)
+[11:45:09]     5.3s, 215 clusters, 6.43% noise on the fit set
+[11:45:09]   labelling all 157,501,580 rows (RBC)
+[11:46:49]     99.5s, 6.62% cohort noise
+[11:46:52]     DBCV 0.4156547947443766 (400 pts/cluster), rel_validity 0.2945, connectivity 1.000, prob mean 0.827
+[11:46:53]     saved cluster_persistence, outlier_scores, exemplars
+[11:46:53]   building SBS96 counts (cached index)
+[11:46:53]   SigProfiler on 215 clusters (147,073,359 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 215 out of 215 | elapsed:    0.2s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[11:46:54]     cosine mean 0.276, L1% mean 170.7, top-channel median 0.672
+[11:46:54] [8/24] fit500000_mcs2500_ms15_eom
+[11:46:54]   fitting HDBSCAN on 500,000 rows (mcs=2500, ms=15, eom, eps=0.0)
+[11:47:00]     5.3s, 89 clusters, 7.24% noise on the fit set
+[11:47:00]   labelling all 157,501,580 rows (RBC)
+[11:48:40]     99.5s, 7.27% cohort noise
+[11:48:42]     DBCV 0.4407456518740483 (400 pts/cluster), rel_validity 0.3462, connectivity 1.000, prob mean 0.845
+[11:48:42]     saved cluster_persistence, outlier_scores, exemplars
+[11:48:42]   building SBS96 counts (cached index)
+[11:48:43]   SigProfiler on 89 clusters (146,048,222 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done  76 out of  89 | elapsed:    0.1s remaining:    0.0s
+[Parallel(n_jobs=16)]: Done  89 out of  89 | elapsed:    0.1s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[11:48:43]     cosine mean 0.275, L1% mean 168.4, top-channel median 0.549
+[11:48:43] [9/24] fit1000000_mcs250_ms5_eom
+[11:48:43]   fitting HDBSCAN on 1,000,000 rows (mcs=250, ms=5, eom, eps=0.0)
+[11:49:05]     20.3s, 814 clusters, 12.61% noise on the fit set
+[11:49:05]   labelling all 157,501,580 rows (RBC)
+[11:50:14]     67.9s, 16.83% cohort noise
+[11:50:24]     DBCV 0.08810722948745413 (400 pts/cluster), rel_validity 0.2595, connectivity 0.998, prob mean 0.750
+[11:50:25]     saved cluster_persistence, outlier_scores, exemplars
+[11:50:25]   building SBS96 counts (cached index)
+[11:50:26]   SigProfiler on 814 clusters (130,994,689 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 512 tasks      | elapsed:    0.4s
+[Parallel(n_jobs=16)]: Done 814 out of 814 | elapsed:    0.5s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[11:50:27]     cosine mean 0.256, L1% mean 175.5, top-channel median 0.894
+[11:50:27] [10/24] fit1000000_mcs500_ms5_eom
+[11:50:27]   fitting HDBSCAN on 1,000,000 rows (mcs=500, ms=5, eom, eps=0.0)
+[11:50:49]     20.3s, 584 clusters, 10.29% noise on the fit set
+[11:50:49]   labelling all 157,501,580 rows (RBC)
+[11:51:57]     67.0s, 12.90% cohort noise
+[11:52:05]     DBCV 0.16205387309425676 (400 pts/cluster), rel_validity 0.2768, connectivity 0.999, prob mean 0.744
+[11:52:06]     saved cluster_persistence, outlier_scores, exemplars
+[11:52:06]   building SBS96 counts (cached index)
+[11:52:07]   SigProfiler on 584 clusters (137,189,849 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 426 tasks      | elapsed:    0.3s
+[Parallel(n_jobs=16)]: Done 584 out of 584 | elapsed:    0.4s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[11:52:07]     cosine mean 0.268, L1% mean 173.9, top-channel median 0.844
+[11:52:07] [11/24] fit1000000_mcs1000_ms5_eom
+[11:52:08]   fitting HDBSCAN on 1,000,000 rows (mcs=1000, ms=5, eom, eps=0.0)
+[11:52:30]     20.2s, 375 clusters, 9.25% noise on the fit set
+[11:52:30]   labelling all 157,501,580 rows (RBC)
+[11:53:37]     66.6s, 10.69% cohort noise
+[11:53:42]     DBCV 0.29668413955281037 (400 pts/cluster), rel_validity 0.2845, connectivity 1.000, prob mean 0.787
+[11:53:43]     saved cluster_persistence, outlier_scores, exemplars
+[11:53:43]   building SBS96 counts (cached index)
+[11:53:44]   SigProfiler on 375 clusters (140,667,787 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 375 out of 375 | elapsed:    0.2s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[11:53:44]     cosine mean 0.272, L1% mean 172.4, top-channel median 0.757
+[11:53:44] [12/24] fit1000000_mcs2500_ms5_eom
+[11:53:44]   fitting HDBSCAN on 1,000,000 rows (mcs=2500, ms=5, eom, eps=0.0)
+[11:54:06]     20.3s, 176 clusters, 8.00% noise on the fit set
+[11:54:06]   labelling all 157,501,580 rows (RBC)
+[11:55:13]     66.2s, 8.24% cohort noise
+[11:55:15]     DBCV 0.39452649462206024 (400 pts/cluster), rel_validity 0.3124, connectivity 1.000, prob mean 0.816
+[11:55:16]     saved cluster_persistence, outlier_scores, exemplars
+[11:55:16]   building SBS96 counts (cached index)
+[11:55:17]   SigProfiler on 176 clusters (144,521,767 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 109 out of 176 | elapsed:    0.1s remaining:    0.1s
+[Parallel(n_jobs=16)]: Done 176 out of 176 | elapsed:    0.1s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[11:55:18]     cosine mean 0.281, L1% mean 169.7, top-channel median 0.659
+[11:55:18] [13/24] fit1000000_mcs250_ms15_eom
+[11:55:18]   fitting HDBSCAN on 1,000,000 rows (mcs=250, ms=15, eom, eps=0.0)
+[11:55:39]     18.8s, 735 clusters, 13.22% noise on the fit set
+[11:55:39]   labelling all 157,501,580 rows (RBC)
+[11:57:43]     123.0s, 15.88% cohort noise
+[11:57:52]     DBCV 0.22358966330355462 (400 pts/cluster), rel_validity 0.3223, connectivity 0.999, prob mean 0.724
+[11:57:53]     saved cluster_persistence, outlier_scores, exemplars
+[11:57:53]   building SBS96 counts (cached index)
+[11:57:54]   SigProfiler on 735 clusters (132,493,940 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 426 tasks      | elapsed:    0.3s
+[Parallel(n_jobs=16)]: Done 608 tasks      | elapsed:    0.4s
+[Parallel(n_jobs=16)]: Done 735 out of 735 | elapsed:    0.6s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[11:57:55]     cosine mean 0.258, L1% mean 175.4, top-channel median 0.897
+[11:57:55] [14/24] fit1000000_mcs500_ms15_eom
+[11:57:56]   fitting HDBSCAN on 1,000,000 rows (mcs=500, ms=15, eom, eps=0.0)
+[11:58:17]     18.8s, 534 clusters, 9.86% noise on the fit set
+[11:58:17]   labelling all 157,501,580 rows (RBC)
+[12:00:21]     122.9s, 10.89% cohort noise
+[12:00:28]     DBCV 0.29748549019591064 (400 pts/cluster), rel_validity 0.3303, connectivity 1.000, prob mean 0.736
+[12:00:29]     saved cluster_persistence, outlier_scores, exemplars
+[12:00:29]   building SBS96 counts (cached index)
+[12:00:30]   SigProfiler on 534 clusters (140,345,459 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 412 tasks      | elapsed:    0.3s
+[Parallel(n_jobs=16)]: Done 534 out of 534 | elapsed:    0.3s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[12:00:31]     cosine mean 0.275, L1% mean 173.3, top-channel median 0.826
+[12:00:31] [15/24] fit1000000_mcs1000_ms15_eom
+[12:00:31]   fitting HDBSCAN on 1,000,000 rows (mcs=1000, ms=15, eom, eps=0.0)
+[12:00:52]     18.8s, 357 clusters, 7.82% noise on the fit set
+[12:00:52]   labelling all 157,501,580 rows (RBC)
+[12:02:55]     122.6s, 8.31% cohort noise
+[12:03:00]     DBCV 0.34733215048150357 (400 pts/cluster), rel_validity 0.3048, connectivity 1.000, prob mean 0.785
+[12:03:01]     saved cluster_persistence, outlier_scores, exemplars
+[12:03:01]   building SBS96 counts (cached index)
+[12:03:02]   SigProfiler on 357 clusters (144,413,304 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 357 out of 357 | elapsed:    0.2s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[12:03:03]     cosine mean 0.270, L1% mean 172.6, top-channel median 0.744
+[12:03:03] [16/24] fit1000000_mcs2500_ms15_eom
+[12:03:03]   fitting HDBSCAN on 1,000,000 rows (mcs=2500, ms=15, eom, eps=0.0)
+[12:03:25]     18.8s, 175 clusters, 7.24% noise on the fit set
+[12:03:25]   labelling all 157,501,580 rows (RBC)
+[12:05:27]     122.4s, 7.36% cohort noise
+[12:05:30]     DBCV 0.43130969929049423 (400 pts/cluster), rel_validity 0.3174, connectivity 1.000, prob mean 0.828
+[12:05:31]     saved cluster_persistence, outlier_scores, exemplars
+[12:05:31]   building SBS96 counts (cached index)
+[12:05:32]   SigProfiler on 175 clusters (145,916,931 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=16)]: Done  48 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=16)]: Done 108 out of 175 | elapsed:    0.1s remaining:    0.1s
+[Parallel(n_jobs=16)]: Done 144 out of 175 | elapsed:    0.1s remaining:    0.0s
+[Parallel(n_jobs=16)]: Done 175 out of 175 | elapsed:    0.1s finished
+Assigning COSMIC sigs or Signature Database ...... 
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[12:05:32]     cosine mean 0.280, L1% mean 169.7, top-channel median 0.653
+[12:05:32] [17/24] fit5000000_mcs250_ms5_eom
+[12:05:33]   fitting HDBSCAN on 5,000,000 rows (mcs=250, ms=5, eom, eps=0.0)
+[12:13:37]     458.3s, 1,096 clusters, 7.94% noise on the fit set
+[12:13:37]   labelling all 157,501,580 rows (RBC)
+[12:16:05]     148.1s, 11.67% cohort noise
+[12:16:21]     DBCV 0.01607309514655881 (400 pts/cluster), rel_validity 0.2142, connectivity 0.998, prob mean 0.862
+[12:16:27]     saved cluster_persistence, outlier_scores, exemplars
+[12:16:27]   building SBS96 counts (cached index)
+[12:16:28]   SigProfiler on 1,096 clusters (139,120,617 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.7s
+[Parallel(n_jobs=16)]: Done 216 tasks      | elapsed:    3.9s
+[Parallel(n_jobs=16)]: Done 1065 out of 1096 | elapsed:    4.2s remaining:    0.1s
+[Parallel(n_jobs=16)]: Done 1096 out of 1096 | elapsed:    4.3s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[12:16:33]     cosine mean 0.257, L1% mean 175.5, top-channel median 0.873
+[12:16:33] [18/24] fit5000000_mcs500_ms5_eom
+[12:16:34]   fitting HDBSCAN on 5,000,000 rows (mcs=500, ms=5, eom, eps=0.0)
+[12:24:38]     458.0s, 856 clusters, 7.45% noise on the fit set
+[12:24:38]   labelling all 157,501,580 rows (RBC)
+[12:27:04]     145.9s, 10.63% cohort noise
+[12:27:16]     DBCV 0.06872154786232307 (400 pts/cluster), rel_validity 0.2347, connectivity 0.999, prob mean 0.855
+[12:27:22]     saved cluster_persistence, outlier_scores, exemplars
+[12:27:22]   building SBS96 counts (cached index)
+[12:27:23]   SigProfiler on 856 clusters (140,764,196 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.4s
+[Parallel(n_jobs=16)]: Done 148 tasks      | elapsed:    3.6s
+[Parallel(n_jobs=16)]: Done 856 out of 856 | elapsed:    3.9s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[12:27:28]     cosine mean 0.263, L1% mean 174.9, top-channel median 0.864
+[12:27:28] [19/24] fit5000000_mcs1000_ms5_eom
+[12:27:29]   fitting HDBSCAN on 5,000,000 rows (mcs=1000, ms=5, eom, eps=0.0)
+[12:35:30]     457.3s, 692 clusters, 6.72% noise on the fit set
+[12:35:30]   labelling all 157,501,580 rows (RBC)
+[12:37:39]     128.6s, 9.32% cohort noise
+[12:37:49]     DBCV 0.11315308694781108 (400 pts/cluster), rel_validity 0.2518, connectivity 0.999, prob mean 0.842
+[12:37:55]     saved cluster_persistence, outlier_scores, exemplars
+[12:37:55]   building SBS96 counts (cached index)
+[12:37:56]   SigProfiler on 692 clusters (142,823,858 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.2s
+[Parallel(n_jobs=16)]: Done 216 tasks      | elapsed:    3.4s
+[Parallel(n_jobs=16)]: Done 608 tasks      | elapsed:    3.6s
+[Parallel(n_jobs=16)]: Done 692 out of 692 | elapsed:    3.7s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[12:38:01]     cosine mean 0.263, L1% mean 174.7, top-channel median 0.868
+[12:38:01] [20/24] fit5000000_mcs2500_ms5_eom
+[12:38:01]   fitting HDBSCAN on 5,000,000 rows (mcs=2500, ms=5, eom, eps=0.0)
+[12:46:02]     457.1s, 513 clusters, 6.55% noise on the fit set
+[12:46:02]   labelling all 157,501,580 rows (RBC)
+[12:48:09]     127.0s, 8.77% cohort noise
+[12:48:17]     DBCV 0.20005168395180167 (400 pts/cluster), rel_validity 0.2624, connectivity 1.000, prob mean 0.839
+[12:48:23]     saved cluster_persistence, outlier_scores, exemplars
+[12:48:23]   building SBS96 counts (cached index)
+[12:48:24]   SigProfiler on 513 clusters (143,692,925 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.0s
+[Parallel(n_jobs=16)]: Done 216 tasks      | elapsed:    3.3s
+[Parallel(n_jobs=16)]: Done 513 out of 513 | elapsed:    3.6s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[12:48:28]     cosine mean 0.280, L1% mean 172.8, top-channel median 0.812
+[12:48:28] [21/24] fit5000000_mcs250_ms15_eom
+[12:48:29]   fitting HDBSCAN on 5,000,000 rows (mcs=250, ms=15, eom, eps=0.0)
+[12:56:44]     460.4s, 1,330 clusters, 14.04% noise on the fit set
+[12:56:44]   labelling all 157,501,580 rows (RBC)
+[13:01:01]     257.2s, 19.43% cohort noise
+[13:01:19]     DBCV 0.0014723692684132234 (400 pts/cluster), rel_validity 0.1970, connectivity 0.998, prob mean 0.768
+[13:01:25]     saved cluster_persistence, outlier_scores, exemplars
+[13:01:25]   building SBS96 counts (cached index)
+[13:01:26]   SigProfiler on 1,330 clusters (126,891,194 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.2s
+[Parallel(n_jobs=16)]: Done 216 tasks      | elapsed:    3.4s
+[Parallel(n_jobs=16)]: Done 1058 tasks      | elapsed:    3.9s
+[Parallel(n_jobs=16)]: Done 1250 tasks      | elapsed:    4.1s
+[Parallel(n_jobs=16)]: Done 1330 out of 1330 | elapsed:    4.1s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[13:01:31]     cosine mean 0.244, L1% mean 176.9, top-channel median 0.917
+[13:01:31] [22/24] fit5000000_mcs500_ms15_eom
+[13:01:32]   fitting HDBSCAN on 5,000,000 rows (mcs=500, ms=15, eom, eps=0.0)
+[13:09:47]     460.5s, 1,008 clusters, 12.70% noise on the fit set
+[13:09:47]   labelling all 157,501,580 rows (RBC)
+[13:14:04]     257.0s, 17.11% cohort noise
+[13:14:19]     DBCV 0.0547015692030264 (400 pts/cluster), rel_validity 0.2466, connectivity 0.999, prob mean 0.762
+[13:14:25]     saved cluster_persistence, outlier_scores, exemplars
+[13:14:25]   building SBS96 counts (cached index)
+[13:14:26]   SigProfiler on 1,008 clusters (130,559,723 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.3s
+[Parallel(n_jobs=16)]: Done 272 tasks      | elapsed:    3.6s
+[Parallel(n_jobs=16)]: Done 848 tasks      | elapsed:    3.8s
+[Parallel(n_jobs=16)]: Done 1008 out of 1008 | elapsed:    4.0s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[13:14:31]     cosine mean 0.255, L1% mean 175.9, top-channel median 0.918
+[13:14:31] [23/24] fit5000000_mcs1000_ms15_eom
+[13:14:31]   fitting HDBSCAN on 5,000,000 rows (mcs=1000, ms=15, eom, eps=0.0)
+[13:22:45]     459.8s, 784 clusters, 11.10% noise on the fit set
+[13:22:45]   labelling all 157,501,580 rows (RBC)
+[13:27:02]     256.7s, 14.39% cohort noise
+[13:27:14]     DBCV 0.12602090345046255 (400 pts/cluster), rel_validity 0.2453, connectivity 0.999, prob mean 0.759
+[13:27:20]     saved cluster_persistence, outlier_scores, exemplars
+[13:27:20]   building SBS96 counts (cached index)
+[13:27:21]   SigProfiler on 784 clusters (134,835,241 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.3s
+[Parallel(n_jobs=16)]: Done 132 tasks      | elapsed:    3.4s
+[Parallel(n_jobs=16)]: Done 601 tasks      | elapsed:    3.6s
+[Parallel(n_jobs=16)]: Done 784 out of 784 | elapsed:    3.8s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[13:27:25]     cosine mean 0.260, L1% mean 175.1, top-channel median 0.908
+[13:27:25] [24/24] fit5000000_mcs2500_ms15_eom
+[13:27:26]   fitting HDBSCAN on 5,000,000 rows (mcs=2500, ms=15, eom, eps=0.0)
+[13:35:40]     459.8s, 548 clusters, 9.34% noise on the fit set
+[13:35:40]   labelling all 157,501,580 rows (RBC)
+[13:39:56]     255.6s, 11.25% cohort noise
+[13:40:04]     DBCV 0.19738777111476113 (400 pts/cluster), rel_validity 0.3044, connectivity 1.000, prob mean 0.771
+[13:40:10]     saved cluster_persistence, outlier_scores, exemplars
+[13:40:10]   building SBS96 counts (cached index)
+[13:40:11]   SigProfiler on 548 clusters (139,775,150 mutations)
+[Parallel(n_jobs=16)]: Using backend LokyBackend with 16 concurrent workers.
+Assigning COSMIC sigs or Signature Database ...... 
+[Parallel(n_jobs=16)]: Done  40 tasks      | elapsed:    3.2s
+[Parallel(n_jobs=16)]: Done 216 tasks      | elapsed:    3.4s
+[Parallel(n_jobs=16)]: Done 548 out of 548 | elapsed:    3.6s finished
+
+
+ 
+Your Job Is Successfully Completed! Thank You For Using SigProfilerAssignment.
+ 
+[13:40:15]     cosine mean 0.275, L1% mean 173.2, top-channel median 0.826
+shape: (24, 23)
+┌───────────────────────────┬──────────┬──────┬─────┬────────┬─────┬────────────┬───────────┬──────────┬────────┬────────┬──────────┬─────────┬───────────┬──────────┬─────────┬──────────┬───────────┬──────────┬──────────┬──────────┬───────┬─────────┐
+│ label                     ┆ fit_rows ┆ mcs  ┆ ms  ┆ method ┆ eps ┆ n_clusters ┆ noise_pct ┆ top_chan ┆ tc>0.5 ┆ tc>0.8 ┆ dbcv     ┆ connect ┆ prob_mean ┆ prob>0.8 ┆ persist ┆ cos_mean ┆ cos_wmean ┆ l1%_mean ┆ l2%_mean ┆ mut%>0.8 ┆ fit_s ┆ label_s │
+│ ---                       ┆ ---      ┆ ---  ┆ --- ┆ ---    ┆ --- ┆ ---        ┆ ---       ┆ ---      ┆ ---    ┆ ---    ┆ ---      ┆ ---     ┆ ---       ┆ ---      ┆ ---     ┆ ---      ┆ ---       ┆ ---      ┆ ---      ┆ ---      ┆ ---   ┆ ---     │
+│ str                       ┆ i64      ┆ i64  ┆ i64 ┆ str    ┆ f64 ┆ i64        ┆ f64       ┆ f64      ┆ f64    ┆ f64    ┆ f64      ┆ f64     ┆ f64       ┆ f64      ┆ f64     ┆ f64      ┆ f64       ┆ f64      ┆ f64      ┆ f64      ┆ f64   ┆ f64     │
+╞═══════════════════════════╪══════════╪══════╪═════╪════════╪═════╪════════════╪═══════════╪══════════╪════════╪════════╪══════════╪═════════╪═══════════╪══════════╪═════════╪══════════╪═══════════╪══════════╪══════════╪══════════╪═══════╪═════════╡
+│ fit500000_mcs2500_ms15_eo ┆ 500000   ┆ 2500 ┆ 15  ┆ eom    ┆ 0.0 ┆ 89         ┆ 7.27      ┆ 0.549    ┆ 0.629  ┆ 0.135  ┆ 0.440746 ┆ 1.0     ┆ 0.845     ┆ 0.735    ┆ 0.2252  ┆ 0.2749   ┆ 0.2844    ┆ 168.39   ┆ 103.07   ┆ 0.0      ┆ 5.3   ┆ 99.5    │
+│ m                         ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆       ┆         │
+│ fit500000_mcs2500_ms5_eom ┆ 500000   ┆ 2500 ┆ 5   ┆ eom    ┆ 0.0 ┆ 88         ┆ 12.5      ┆ 0.57     ┆ 0.614  ┆ 0.148  ┆ 0.445131 ┆ 1.0     ┆ 0.82      ┆ 0.704    ┆ 0.2149  ┆ 0.2613   ┆ 0.2665    ┆ 170.38   ┆ 104.28   ┆ 0.9      ┆ 5.8   ┆ 53.1    │
+│ fit1000000_mcs2500_ms15_e ┆ 1000000  ┆ 2500 ┆ 15  ┆ eom    ┆ 0.0 ┆ 175        ┆ 7.36      ┆ 0.653    ┆ 0.663  ┆ 0.274  ┆ 0.43131  ┆ 1.0     ┆ 0.828     ┆ 0.722    ┆ 1.0     ┆ 0.2804   ┆ 0.2774    ┆ 169.73   ┆ 100.91   ┆ 1.4      ┆ 18.8  ┆ 122.4   │
+│ om                        ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆       ┆         │
+│ fit1000000_mcs2500_ms5_eo ┆ 1000000  ┆ 2500 ┆ 5   ┆ eom    ┆ 0.0 ┆ 176        ┆ 8.24      ┆ 0.659    ┆ 0.67   ┆ 0.267  ┆ 0.394526 ┆ 1.0     ┆ 0.816     ┆ 0.722    ┆ 1.0     ┆ 0.2806   ┆ 0.2756    ┆ 169.72   ┆ 101.09   ┆ 1.4      ┆ 20.3  ┆ 66.2    │
+│ m                         ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆       ┆         │
+│ fit500000_mcs1000_ms15_eo ┆ 500000   ┆ 1000 ┆ 15  ┆ eom    ┆ 0.0 ┆ 215        ┆ 6.62      ┆ 0.672    ┆ 0.712  ┆ 0.316  ┆ 0.415655 ┆ 1.0     ┆ 0.827     ┆ 0.703    ┆ 1.0     ┆ 0.2757   ┆ 0.2718    ┆ 170.72   ┆ 100.32   ┆ 1.6      ┆ 5.3   ┆ 99.5    │
+│ m                         ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆       ┆         │
+│ fit500000_mcs1000_ms5_eom ┆ 500000   ┆ 1000 ┆ 5   ┆ eom    ┆ 0.0 ┆ 220        ┆ 7.9       ┆ 0.675    ┆ 0.727  ┆ 0.323  ┆ 0.399451 ┆ 1.0     ┆ 0.826     ┆ 0.713    ┆ 1.0     ┆ 0.2787   ┆ 0.2708    ┆ 170.62   ┆ 100.1    ┆ 1.7      ┆ 5.9   ┆ 53.0    │
+│ fit1000000_mcs1000_ms15_e ┆ 1000000  ┆ 1000 ┆ 15  ┆ eom    ┆ 0.0 ┆ 357        ┆ 8.31      ┆ 0.744    ┆ 0.798  ┆ 0.429  ┆ 0.347332 ┆ 1.0     ┆ 0.785     ┆ 0.661    ┆ 1.0     ┆ 0.27     ┆ 0.2657    ┆ 172.64   ┆ 99.84    ┆ 1.9      ┆ 18.8  ┆ 122.6   │
+│ om                        ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆       ┆         │
+│ fit500000_mcs500_ms5_eom  ┆ 500000   ┆ 500  ┆ 5   ┆ eom    ┆ 0.0 ┆ 363        ┆ 9.12      ┆ 0.752    ┆ 0.793  ┆ 0.424  ┆ 0.243985 ┆ 1.0     ┆ 0.782     ┆ 0.676    ┆ 1.0     ┆ 0.27     ┆ 0.2625    ┆ 172.55   ┆ 100.06   ┆ 2.0      ┆ 5.8   ┆ 53.1    │
+│ fit1000000_mcs1000_ms5_eo ┆ 1000000  ┆ 1000 ┆ 5   ┆ eom    ┆ 0.0 ┆ 375        ┆ 10.69     ┆ 0.757    ┆ 0.811  ┆ 0.435  ┆ 0.296684 ┆ 1.0     ┆ 0.787     ┆ 0.699    ┆ 1.0     ┆ 0.2725   ┆ 0.2629    ┆ 172.38   ┆ 99.59    ┆ 2.0      ┆ 20.2  ┆ 66.6    │
+│ m                         ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆       ┆         │
+│ fit500000_mcs500_ms15_eom ┆ 500000   ┆ 500  ┆ 15  ┆ eom    ┆ 0.0 ┆ 348        ┆ 8.15      ┆ 0.757    ┆ 0.799  ┆ 0.445  ┆ 0.336457 ┆ 1.0     ┆ 0.792     ┆ 0.65     ┆ 1.0     ┆ 0.279    ┆ 0.2646    ┆ 171.87   ┆ 99.51    ┆ 2.0      ┆ 5.3   ┆ 99.4    │
+│ fit5000000_mcs2500_ms5_eo ┆ 5000000  ┆ 2500 ┆ 5   ┆ eom    ┆ 0.0 ┆ 513        ┆ 8.77      ┆ 0.812    ┆ 0.836  ┆ 0.511  ┆ 0.200052 ┆ 1.0     ┆ 0.839     ┆ 0.826    ┆ 1.0     ┆ 0.2798   ┆ 0.2607    ┆ 172.78   ┆ 98.27    ┆ 2.3      ┆ 457.1 ┆ 127.0   │
+│ m                         ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆       ┆         │
+│ fit1000000_mcs500_ms15_eo ┆ 1000000  ┆ 500  ┆ 15  ┆ eom    ┆ 0.0 ┆ 534        ┆ 10.89     ┆ 0.826    ┆ 0.843  ┆ 0.53   ┆ 0.297485 ┆ 1.0     ┆ 0.736     ┆ 0.613    ┆ 1.0     ┆ 0.2752   ┆ 0.2618    ┆ 173.26   ┆ 98.41    ┆ 2.0      ┆ 18.8  ┆ 122.9   │
+│ m                         ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆       ┆         │
+│ fit5000000_mcs2500_ms15_e ┆ 5000000  ┆ 2500 ┆ 15  ┆ eom    ┆ 0.0 ┆ 548        ┆ 11.25     ┆ 0.826    ┆ 0.847  ┆ 0.529  ┆ 0.197388 ┆ 1.0     ┆ 0.771     ┆ 0.732    ┆ 1.0     ┆ 0.275    ┆ 0.2605    ┆ 173.25   ┆ 98.33    ┆ 2.1      ┆ 459.8 ┆ 255.6   │
+│ om                        ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆       ┆         │
+│ fit500000_mcs250_ms15_eom ┆ 500000   ┆ 250  ┆ 15  ┆ eom    ┆ 0.0 ┆ 518        ┆ 10.66     ┆ 0.827    ┆ 0.844  ┆ 0.531  ┆ 0.328619 ┆ 1.0     ┆ 0.759     ┆ 0.607    ┆ 1.0     ┆ 0.2771   ┆ 0.2628    ┆ 173.0    ┆ 98.4     ┆ 2.0      ┆ 5.4   ┆ 100.0   │
+│ fit500000_mcs250_ms5_eom  ┆ 500000   ┆ 250  ┆ 5   ┆ eom    ┆ 0.0 ┆ 560        ┆ 12.42     ┆ 0.829    ┆ 0.841  ┆ 0.541  ┆ 0.189059 ┆ 0.999   ┆ 0.758     ┆ 0.655    ┆ 1.0     ┆ 0.2689   ┆ 0.2629    ┆ 173.82   ┆ 98.65    ┆ 2.2      ┆ 6.0   ┆ 54.0    │
+│ fit1000000_mcs500_ms5_eom ┆ 1000000  ┆ 500  ┆ 5   ┆ eom    ┆ 0.0 ┆ 584        ┆ 12.9      ┆ 0.844    ┆ 0.846  ┆ 0.548  ┆ 0.162054 ┆ 0.999   ┆ 0.744     ┆ 0.682    ┆ 1.0     ┆ 0.2684   ┆ 0.2619    ┆ 173.93   ┆ 98.64    ┆ 2.4      ┆ 20.3  ┆ 67.0    │
+│ fit5000000_mcs500_ms5_eom ┆ 5000000  ┆ 500  ┆ 5   ┆ eom    ┆ 0.0 ┆ 856        ┆ 10.63     ┆ 0.864    ┆ 0.848  ┆ 0.572  ┆ 0.068722 ┆ 0.999   ┆ 0.855     ┆ 0.845    ┆ 1.0     ┆ 0.2628   ┆ 0.2576    ┆ 174.87   ┆ 98.62    ┆ 2.3      ┆ 458.0 ┆ 145.9   │
+│ fit5000000_mcs1000_ms5_eo ┆ 5000000  ┆ 1000 ┆ 5   ┆ eom    ┆ 0.0 ┆ 692        ┆ 9.32      ┆ 0.868    ┆ 0.847  ┆ 0.564  ┆ 0.113153 ┆ 0.999   ┆ 0.842     ┆ 0.833    ┆ 1.0     ┆ 0.2631   ┆ 0.2588    ┆ 174.71   ┆ 98.73    ┆ 2.3      ┆ 457.3 ┆ 128.6   │
+│ m                         ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆       ┆         │
+│ fit5000000_mcs250_ms5_eom ┆ 5000000  ┆ 250  ┆ 5   ┆ eom    ┆ 0.0 ┆ 1096       ┆ 11.67     ┆ 0.873    ┆ 0.854  ┆ 0.574  ┆ 0.016073 ┆ 0.998   ┆ 0.862     ┆ 0.853    ┆ 1.0     ┆ 0.2569   ┆ 0.2567    ┆ 175.49   ┆ 99.06    ┆ 2.2      ┆ 458.3 ┆ 148.1   │
+│ fit1000000_mcs250_ms5_eom ┆ 1000000  ┆ 250  ┆ 5   ┆ eom    ┆ 0.0 ┆ 814        ┆ 16.83     ┆ 0.894    ┆ 0.861  ┆ 0.607  ┆ 0.088107 ┆ 0.998   ┆ 0.75      ┆ 0.697    ┆ 1.0     ┆ 0.256    ┆ 0.2579    ┆ 175.5    ┆ 98.71    ┆ 2.1      ┆ 20.3  ┆ 67.9    │
+│ fit1000000_mcs250_ms15_eo ┆ 1000000  ┆ 250  ┆ 15  ┆ eom    ┆ 0.0 ┆ 735        ┆ 15.88     ┆ 0.897    ┆ 0.879  ┆ 0.614  ┆ 0.22359  ┆ 0.999   ┆ 0.724     ┆ 0.608    ┆ 1.0     ┆ 0.2579   ┆ 0.2626    ┆ 175.45   ┆ 98.6     ┆ 2.5      ┆ 18.8  ┆ 123.0   │
+│ m                         ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆       ┆         │
+│ fit5000000_mcs1000_ms15_e ┆ 5000000  ┆ 1000 ┆ 15  ┆ eom    ┆ 0.0 ┆ 784        ┆ 14.39     ┆ 0.908    ┆ 0.867  ┆ 0.617  ┆ 0.126021 ┆ 0.999   ┆ 0.759     ┆ 0.726    ┆ 1.0     ┆ 0.2599   ┆ 0.2604    ┆ 175.1    ┆ 98.44    ┆ 2.6      ┆ 459.8 ┆ 256.7   │
+│ om                        ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆       ┆         │
+│ fit5000000_mcs250_ms15_eo ┆ 5000000  ┆ 250  ┆ 15  ┆ eom    ┆ 0.0 ┆ 1330       ┆ 19.43     ┆ 0.917    ┆ 0.876  ┆ 0.632  ┆ 0.001472 ┆ 0.998   ┆ 0.768     ┆ 0.742    ┆ 1.0     ┆ 0.2443   ┆ 0.2611    ┆ 176.92   ┆ 99.2     ┆ 2.6      ┆ 460.4 ┆ 257.2   │
+│ m                         ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆       ┆         │
+│ fit5000000_mcs500_ms15_eo ┆ 5000000  ┆ 500  ┆ 15  ┆ eom    ┆ 0.0 ┆ 1008       ┆ 17.11     ┆ 0.918    ┆ 0.873  ┆ 0.631  ┆ 0.054702 ┆ 0.999   ┆ 0.762     ┆ 0.731    ┆ 1.0     ┆ 0.2548   ┆ 0.2609    ┆ 175.88   ┆ 98.49    ┆ 2.6      ┆ 460.5 ┆ 257.0   │
+│ m                         ┆          ┆      ┆     ┆        ┆     ┆            ┆           ┆          ┆        ┆        ┆          ┆         ┆           ┆          ┆         ┆          ┆           ┆          ┆          ┆          ┆       ┆         │
+└───────────────────────────┴──────────┴──────┴─────┴────────┴─────┴────────────┴───────────┴──────────┴────────┴────────┴──────────┴─────────┴───────────┴──────────┴─────────┴──────────┴───────────┴──────────┴──────────┴──────────┴───────┴─────────┘
+[13:40:15] done
+[16:40:18] === BOTH PASSES DONE ===
