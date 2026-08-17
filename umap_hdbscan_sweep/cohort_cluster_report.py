@@ -123,7 +123,13 @@ def parse_args() -> argparse.Namespace:
                    help="optional (N,) float per-row membership probability")
 
     p.add_argument("--analysis-rows", type=int, default=2_000_000,
-                   help="rows sampled into analysis.parquet (stats, trinucs, profiles)")
+                   help="rows sampled into analysis.parquet (stats, trinucs, profiles). "
+                        "0 (or any value >= the cohort size) takes EVERY row, which makes "
+                        "the trinucleotide counts and cluster stats exact rather than "
+                        "estimated from a sample -- at the cost of ~13 bytes per value held "
+                        "in RAM while the frame is built, and an analysis.parquet of "
+                        "several GB per cell. Single-cell territory; see the estimate the "
+                        "run prints before it starts")
     p.add_argument("--plot-rows", type=int, default=300_000,
                    help="rows subsampled from that for the scatter plots")
     p.add_argument("--max-clusters", type=int, default=0,
@@ -213,13 +219,24 @@ def read_dedup_columns(manifest_path: Path, positions: np.ndarray,
         hi = int(np.searchsorted(positions, stop, side="left"))
         if lo == hi:
             continue
-        local = (positions[lo:hi] - start).tolist()
         frame = pl.read_parquet(Path(entry["path"]), columns=wanted)
-        blocks.append(frame[local])
+        # A full pass selects every row of the part, and `frame[local]` would then be a
+        # gather that copies the whole thing to produce an identical frame. Skipping it
+        # halves peak memory on the one path where the frame is largest -- at 157.5M rows
+        # the difference is tens of gigabytes.
+        if hi - lo == stop - start:
+            blocks.append(frame)
+        else:
+            blocks.append(frame[(positions[lo:hi] - start).tolist()])
 
     # Parts are visited in ascending position order and `positions` is sorted, so a plain
     # vertical concat is already in sampling order -- no argsort needed.
-    return pl.concat(blocks, how="vertical"), skipped
+    #
+    # rechunk=False because the default (True) copies every block into one contiguous
+    # allocation, which momentarily needs the whole frame twice. Nothing downstream requires
+    # contiguity: the frame is written straight to parquet and otherwise queried through
+    # DuckDB.
+    return pl.concat(blocks, how="vertical", rechunk=False), skipped
 
 
 def resolve_color_columns(args, trial_default: list[str], rvcp) -> tuple[list[str], list[str]]:
@@ -440,8 +457,16 @@ def main() -> int:
 
     latent = np.load(latent_path, mmap_mode="r")
     total_rows = int(latent.shape[0])
-    positions = sample_positions(total_rows, args.analysis_rows, args.seed)
-    log(f"cohort {total_rows:,} rows -> sampling {positions.size:,}")
+    # 0 means "every row" -- sample_positions already returns the full range whenever the
+    # requested count reaches the total, so this only has to name that case readably.
+    requested_rows = total_rows if args.analysis_rows <= 0 else args.analysis_rows
+    positions = sample_positions(total_rows, requested_rows, args.seed)
+    full_pass = positions.size == total_rows
+    if full_pass:
+        log(f"cohort {total_rows:,} rows -> FULL PASS, no sampling")
+    else:
+        log(f"cohort {total_rows:,} rows -> sampling {positions.size:,} "
+            f"({100 * positions.size / total_rows:.2f}%)")
 
     if args.coords is not None:
         coords = np.load(args.coords, mmap_mode="r")
@@ -467,7 +492,17 @@ def main() -> int:
         args, rvcp.DEFAULT_COLOR_COLUMNS, rvcp)
     wanted = rvcp.unique_columns([*CONTEXT_COLUMNS, *color_columns])
     log(f"reading {len(wanted)} columns from the dedup parts")
-    context, skipped = read_dedup_columns(manifest_path, positions, wanted)
+    if full_pass:
+        # ~13 bytes per value, measured on this data: a 2,000,000 x 39 frame occupies about
+        # 1.02 GB. Printed rather than enforced -- the caller knows their machine, and a hard
+        # ceiling here would be guessing.
+        estimate_gb = positions.size * len(wanted) * 13 / 1e9
+        log(f"  full pass: ~{estimate_gb:.0f} GB to hold {positions.size:,} x {len(wanted)} "
+            f"in RAM, and one analysis.parquet of a few GB PER CELL")
+        if len(cells) > 1:
+            log(f"  NOTE: {len(cells)} cells requested. The frame is read once and shared, "
+                f"but each cell writes its own full-size analysis.parquet -- consider "
+                f"--cells <one> for a full pass")
     if context.height != positions.size:
         raise SystemExit(f"gathered {context.height:,} rows, expected {positions.size:,}")
 
