@@ -65,7 +65,11 @@ from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+# Walk up to the directory that holds uv_vae/ rather than counting levels: these scripts
+# get reorganised into subfolders (umap/, hdbscan/, tests/), and a hard-coded parents[N]
+# silently resolves to the wrong root the moment one moves, failing on `import uv_vae`.
+REPO_ROOT = next((p for p in Path(__file__).resolve().parents if (p / "uv_vae").is_dir()),
+                 Path(__file__).resolve().parents[1])
 for candidate in (REPO_ROOT / "uv_vae", REPO_ROOT, Path(__file__).resolve().parent):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
@@ -142,29 +146,53 @@ def main() -> int:
     log(f"fingerprint: {len(IDENTITY_COLUMNS)} identity + {len(measurements)} measurements")
     log(f"to recover:  {len(recovered)} columns")
 
-    on_clause = " AND ".join(
-        # NOT DISTINCT FROM, not =: a null on either side must match a null, and SQL equality
-        # returns unknown there, which would drop every row with a null measurement.
-        f's.{quote_ident(c)} IS NOT DISTINCT FROM k.{quote_ident(c)}' for c in fingerprint
+    # The join is anchored on the four identity columns ALONE, with the measurements applied
+    # afterwards as a filter. That split is not cosmetic: putting all 35 columns in the ON
+    # clause -- and they must be null-safe comparisons, since SQL equality returns unknown
+    # against a null and would silently drop every row with a null measurement -- gives the
+    # planner a join condition it cannot hash on, and it degrades to a nested loop. Two
+    # million keys against five billion source rows never finishes that way. Identity is a
+    # plain equi-join the planner hashes, cutting the candidates to the ~32 reads at each
+    # locus, and the measurements then pick the one read out of those. Same result set,
+    # because an inner join on 35 columns is exactly an inner join on 4 filtered by the
+    # other 31.
+    match_clause = " AND ".join(
+        f's.{quote_ident(c)} IS NOT DISTINCT FROM k.{quote_ident(c)}' for c in measurements
     )
     select_recovered = ", ".join(f"s.{quote_ident(c)}" for c in recovered)
 
+    # One chromosome at a time, mirroring stage 0. The source files are sorted by
+    # (CHROM, POS), so pinning CHROM lets the row-group statistics prune every group that
+    # cannot match, and it turns one opaque multi-hour scan into 24 steps with visible
+    # progress. Total I/O is unchanged; peak memory and blindness are not.
+    chromosomes = sorted(analysis.select("CHROM").unique().to_series().to_list())
+    log(f"scanning {len(chromosomes)} chromosomes")
+
+    blocks = []
     with connect_duckdb(threads=args.threads) as conn:
         if args.memory_limit:
             conn.execute(f"SET memory_limit='{args.memory_limit}'")
-        conn.register("keys", analysis.select(["__row", *fingerprint]))
 
-        log("scanning source parquets (one pass, joined on the fingerprint)")
-        # DISTINCT ON collapses the case where two reads carry identical measurements: they
-        # are indistinguishable in every column the pipeline used, so either serves, and the
-        # count is reported below rather than passed over.
-        frame = conn.execute(f"""
-            SELECT k."__row", {select_recovered}
-            FROM keys AS k
-            JOIN read_parquet({sql_quote(args.source_glob)}) AS s
-              ON {on_clause}
-            WHERE ({args.row_filter})
-        """).pl()
+        for index, chromosome in enumerate(chromosomes, start=1):
+            subset = analysis.filter(pl.col("CHROM") == chromosome).select(
+                ["__row", *fingerprint])
+            conn.register("keys", subset)
+            block = conn.execute(f"""
+                SELECT k."__row", {select_recovered}
+                FROM keys AS k
+                JOIN read_parquet({sql_quote(args.source_glob)}) AS s
+                  ON s."CHROM" = k."CHROM" AND s."POS" = k."POS"
+                 AND s."REF" = k."REF" AND s."ALT" = k."ALT"
+                WHERE s."CHROM" = {sql_quote(chromosome)}
+                  AND ({args.row_filter})
+                  AND {match_clause}
+            """).pl()
+            blocks.append(block)
+            log(f"  [{index:>2}/{len(chromosomes)}] {chromosome:<6} "
+                f"{subset.height:>9,} keys -> {block.height:>9,} matched "
+                f"({perf_counter() - started:.0f}s)")
+
+    frame = pl.concat(blocks, how="vertical") if blocks else pl.DataFrame()
 
     matched = frame.select(pl.col("__row").n_unique()).item()
     duplicates = frame.height - matched

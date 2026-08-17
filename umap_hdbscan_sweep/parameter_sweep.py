@@ -69,7 +69,11 @@ from itertools import combinations
 from pathlib import Path
 from time import perf_counter
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+# Walk up to the directory that holds uv_vae/ rather than counting levels: these scripts
+# get reorganised into subfolders (umap/, hdbscan/, tests/), and a hard-coded parents[N]
+# silently resolves to the wrong root the moment one moves, failing on `import uv_vae`.
+REPO_ROOT = next((p for p in Path(__file__).resolve().parents if (p / "uv_vae").is_dir()),
+                 Path(__file__).resolve().parents[1])
 for candidate in (REPO_ROOT / "uv_vae", REPO_ROOT, Path(__file__).resolve().parent):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
