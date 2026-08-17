@@ -177,14 +177,24 @@ def main() -> int:
             subset = analysis.filter(pl.col("CHROM") == chromosome).select(
                 ["__row", *fingerprint])
             conn.register("keys", subset)
+            # CHROM is filtered inside the scanned subquery, not in an outer WHERE after the
+            # join. A post-join predicate on the probe side is only pushed into the parquet
+            # scan if the optimiser chooses to hoist it there, and that is not guaranteed once
+            # the other join operand is a registered non-parquet relation -- filtering here
+            # makes the row-group pruning unconditional instead of a planner guess. This is
+            # the difference between reading ~1/24th of the source and reading all 5.08B rows
+            # while a hash table for one chromosome is built underneath it.
             block = conn.execute(f"""
                 SELECT k."__row", {select_recovered}
                 FROM keys AS k
-                JOIN read_parquet({sql_quote(args.source_glob)}) AS s
+                JOIN (
+                    SELECT *
+                    FROM read_parquet({sql_quote(args.source_glob)})
+                    WHERE "CHROM" = {sql_quote(chromosome)}
+                ) AS s
                   ON s."CHROM" = k."CHROM" AND s."POS" = k."POS"
                  AND s."REF" = k."REF" AND s."ALT" = k."ALT"
-                WHERE s."CHROM" = {sql_quote(chromosome)}
-                  AND ({args.row_filter})
+                WHERE ({args.row_filter})
                   AND {match_clause}
             """).pl()
             blocks.append(block)
