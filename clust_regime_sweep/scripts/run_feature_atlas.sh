@@ -46,6 +46,12 @@
 # Env overrides:
 #     REPORTS_DIR    parent of the per-cell subdirs      [auto-detected]
 #     SCRIPT         plot_feature_atlas.py path          [auto-detected]
+#     ENRICHED       path to enriched.parquet; when set, every cell uses this
+#                    instead of its own analysis.parquet so all 70 source
+#                    columns are plotted. Output goes to ATLAS_SUBDIR.
+#                    [unset -> use each cell's analysis.parquet]
+#     ATLAS_SUBDIR   subfolder name inside each cell     [feature_atlas, or
+#                    feature_atlas_enriched when ENRICHED is set]
 #     SAMPLE_ROWS    rows per cell; 0/all = every row    [0 -> full 2M pass]
 #     PARALLEL_JOBS  cells running concurrently          [28 = all at once]
 #     WORKERS        render processes inside each cell   [1]
@@ -66,6 +72,8 @@ fi
 
 REPORTS_DIR="${REPORTS_DIR:-$DEFAULT_REPORTS}"
 SCRIPT="${SCRIPT:-$DEFAULT_SCRIPT}"
+ENRICHED="${ENRICHED:-}"
+ATLAS_SUBDIR="${ATLAS_SUBDIR:-$([ -n "$ENRICHED" ] && echo feature_atlas_enriched || echo feature_atlas)}"
 SAMPLE_ROWS="${SAMPLE_ROWS:-0}"
 PARALLEL_JOBS="${PARALLEL_JOBS:-28}"
 WORKERS="${WORKERS:-1}"
@@ -111,9 +119,13 @@ RAM_GB="$(awk '/^MemAvailable:/ {printf "%.0f", $2/1048576}' /proc/meminfo 2>/de
 [[ "$CORES"  =~ ^[0-9]+$ ]] || CORES='?'
 [[ "$RAM_GB" =~ ^[0-9]+$ ]] || RAM_GB='?'
 
+[ -n "$ENRICHED" ] && { [ -f "$ENRICHED" ] || { echo "ERROR: ENRICHED not found: $ENRICHED" >&2; exit 1; }; }
+
 echo "=== feature atlas sweep ==="
 echo "  reports : $REPORTS_DIR"
 echo "  script  : $SCRIPT"
+echo "  enriched: ${ENRICHED:-<each cell's analysis.parquet>}"
+echo "  subdir  : $ATLAS_SUBDIR"
 echo "  cells   : ${#CELLS[@]}"
 echo "  rows    : $([ "$SAMPLE_ROWS" -ge 1000000000 ] && echo 'all (full 2M pass per cell)' || echo "$SAMPLE_ROWS")"
 echo "  jobs    : $PARALLEL_JOBS concurrent x $WORKERS render worker(s) = $((PARALLEL_JOBS * WORKERS)) processes"
@@ -136,17 +148,24 @@ fi
 echo ""
 
 run_cell() {
-    local cell_dir="$1" name out_dir status
+    local cell_dir="$1" name out_dir analysis_arg status
     name="$(basename "$cell_dir")"
-    out_dir="$cell_dir/feature_atlas"
+    out_dir="$cell_dir/$ATLAS_SUBDIR"
     mkdir -p "$out_dir"
     rm -f "$out_dir/.exit_status"
+
+    # When ENRICHED is set use it; otherwise fall back to each cell's own parquet.
+    if [ -n "$ENRICHED" ]; then
+        analysis_arg="$ENRICHED"
+    else
+        analysis_arg="$cell_dir/analysis.parquet"
+    fi
 
     # `|| status=$?` keeps set -e from killing the background job before the status is
     # recorded -- the tally below reads these files, not the wait status.
     status=0
     python "$SCRIPT" \
-        --analysis   "$cell_dir/analysis.parquet" \
+        --analysis   "$analysis_arg" \
         --output-dir "$out_dir" \
         --sample-rows "$SAMPLE_ROWS" \
         --workers     "$WORKERS" \
@@ -169,8 +188,8 @@ for cell_dir in "${CELLS[@]}"; do
     # written before the contact sheets, so a cell that died during sheet assembly would look
     # finished by file presence alone and get skipped on the retry pass.
     if [ "$FORCE" != "1" ] \
-       && [ -f "$cell_dir/feature_atlas/feature_atlas.csv" ] \
-       && [ "$(cat "$cell_dir/feature_atlas/.exit_status" 2>/dev/null || echo 1)" = "0" ]; then
+       && [ -f "$cell_dir/$ATLAS_SUBDIR/feature_atlas.csv" ] \
+       && [ "$(cat "$cell_dir/$ATLAS_SUBDIR/.exit_status" 2>/dev/null || echo 1)" = "0" ]; then
         echo "[SKIP] $name  (already complete; FORCE=1 to redo)"
         SKIPPED=$((SKIPPED + 1))
         continue
@@ -190,7 +209,7 @@ OK=0
 BAD=0
 FAILED_CELLS=()
 for cell_dir in "${CELLS[@]}"; do
-    status_file="$cell_dir/feature_atlas/.exit_status"
+    status_file="$cell_dir/$ATLAS_SUBDIR/.exit_status"
     [ -f "$status_file" ] || continue
     if [ "$(cat "$status_file")" = "0" ]; then
         OK=$((OK + 1))
@@ -208,4 +227,4 @@ if [ "$BAD" -gt 0 ]; then
     echo "  re-run just those with FORCE=1 after fixing the cause."
     exit 1
 fi
-echo "  per-cell output: <cell>/feature_atlas/{feature_atlas.csv,contact_sheet_*.png,*.png,run.log}"
+echo "  per-cell output: <cell>/$ATLAS_SUBDIR/{feature_atlas.csv,contact_sheet_*.png,*.png,run.log}"
