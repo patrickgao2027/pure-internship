@@ -61,6 +61,8 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -110,7 +112,15 @@ def parse_args() -> argparse.Namespace:
                    help="the 95 source parquets, e.g. '/data/lab/ppmseq_parquets/*.parquet'")
     p.add_argument("--row-filter", default=DEFAULT_ROW_FILTER,
                    help="must match the filter stage 0 ran with")
-    p.add_argument("--threads", type=int, default=16)
+    p.add_argument("--threads", type=int, default=16,
+                   help="total DuckDB worker threads, shared across --parallel-chromosomes")
+    p.add_argument("--parallel-chromosomes", type=int, default=6,
+                   help="chromosome queries in flight at once. Each is I/O-bound (waiting on "
+                        "the source filesystem, not CPU), so running several concurrently "
+                        "keeps more read requests outstanding instead of one at a time; the "
+                        "shared 569 GB source lives on what looks like a network mount, which "
+                        "usually serves concurrent reads better than one sequential stream. "
+                        "Start conservative and raise it if the filesystem tolerates more.")
     p.add_argument("--memory-limit", default=None, help="e.g. 64GB")
     p.add_argument("--output", type=Path, required=True)
     return p.parse_args()
@@ -161,48 +171,79 @@ def main() -> int:
     )
     select_recovered = ", ".join(f"s.{quote_ident(c)}" for c in recovered)
 
-    # One chromosome at a time, mirroring stage 0. The source files are sorted by
-    # (CHROM, POS), so pinning CHROM lets the row-group statistics prune every group that
-    # cannot match, and it turns one opaque multi-hour scan into 24 steps with visible
-    # progress. Total I/O is unchanged; peak memory and blindness are not.
+    # One chromosome per query, mirroring stage 0: the source files are sorted by
+    # (CHROM, POS), so pinning CHROM lets row-group statistics prune every group that cannot
+    # match. Several of those queries run concurrently rather than one at a time, because each
+    # is I/O-bound on the source filesystem rather than CPU-bound -- one query in flight
+    # leaves the disk/network path underused while it waits, so overlapping --parallel-
+    # chromosomes of them keeps more reads outstanding at once. Total bytes read are the same
+    # either way; this only changes how much of that waiting happens concurrently.
     chromosomes = sorted(analysis.select("CHROM").unique().to_series().to_list())
-    log(f"scanning {len(chromosomes)} chromosomes")
+    parallel = max(1, min(args.parallel_chromosomes, len(chromosomes)))
+    log(f"scanning {len(chromosomes)} chromosomes, {parallel} at a time")
 
-    blocks = []
+    keys_by_chrom = {
+        chromosome: analysis.filter(pl.col("CHROM") == chromosome).select(
+            ["__row", *fingerprint])
+        for chromosome in chromosomes
+    }
+
+    # One cursor per worker THREAD, not per task: duckdb connections/cursors are not meant to
+    # be touched from more than one thread concurrently, and creating a fresh cursor per task
+    # from multiple threads at once would itself be a race. threading.local() gives each of
+    # the pool's worker threads exactly one cursor, created lazily the first time that thread
+    # picks up a task, and every later task on that same thread reuses it.
+    local = threading.local()
+
+    def query_chromosome(conn, chromosome: str) -> tuple[str, "pl.DataFrame"]:
+        if not hasattr(local, "cursor"):
+            local.cursor = conn.cursor()
+        cursor = local.cursor
+        view = f"keys_{threading.get_ident()}"
+        cursor.register(view, keys_by_chrom[chromosome])
+        # CHROM (and now row_filter alongside it) is filtered inside the scanned subquery, not
+        # in an outer WHERE after the join. A post-join predicate on the probe side is only
+        # pushed into the parquet scan if the optimiser chooses to hoist it there, which is not
+        # guaranteed once the other join operand is a registered non-parquet relation --
+        # filtering here makes the row-group pruning unconditional instead of a planner guess.
+        # This was the difference between reading ~1/24th of the source and reading all 5.08B
+        # rows while a hash table for one chromosome was built underneath it.
+        block = cursor.execute(f"""
+            SELECT k."__row", {select_recovered}
+            FROM {quote_ident(view)} AS k
+            JOIN (
+                SELECT *
+                FROM read_parquet({sql_quote(args.source_glob)})
+                WHERE "CHROM" = {sql_quote(chromosome)}
+                  AND ({args.row_filter})
+            ) AS s
+              ON s."CHROM" = k."CHROM" AND s."POS" = k."POS"
+             AND s."REF" = k."REF" AND s."ALT" = k."ALT"
+            WHERE {match_clause}
+        """).pl()
+        cursor.unregister(view)
+        return chromosome, block
+
+    blocks_by_chrom: dict[str, "pl.DataFrame"] = {}
     with connect_duckdb(threads=args.threads) as conn:
         if args.memory_limit:
             conn.execute(f"SET memory_limit='{args.memory_limit}'")
 
-        for index, chromosome in enumerate(chromosomes, start=1):
-            subset = analysis.filter(pl.col("CHROM") == chromosome).select(
-                ["__row", *fingerprint])
-            conn.register("keys", subset)
-            # CHROM is filtered inside the scanned subquery, not in an outer WHERE after the
-            # join. A post-join predicate on the probe side is only pushed into the parquet
-            # scan if the optimiser chooses to hoist it there, and that is not guaranteed once
-            # the other join operand is a registered non-parquet relation -- filtering here
-            # makes the row-group pruning unconditional instead of a planner guess. This is
-            # the difference between reading ~1/24th of the source and reading all 5.08B rows
-            # while a hash table for one chromosome is built underneath it.
-            block = conn.execute(f"""
-                SELECT k."__row", {select_recovered}
-                FROM keys AS k
-                JOIN (
-                    SELECT *
-                    FROM read_parquet({sql_quote(args.source_glob)})
-                    WHERE "CHROM" = {sql_quote(chromosome)}
-                ) AS s
-                  ON s."CHROM" = k."CHROM" AND s."POS" = k."POS"
-                 AND s."REF" = k."REF" AND s."ALT" = k."ALT"
-                WHERE ({args.row_filter})
-                  AND {match_clause}
-            """).pl()
-            blocks.append(block)
-            log(f"  [{index:>2}/{len(chromosomes)}] {chromosome:<6} "
-                f"{subset.height:>9,} keys -> {block.height:>9,} matched "
-                f"({perf_counter() - started:.0f}s)")
+        with ThreadPoolExecutor(max_workers=parallel) as pool:
+            futures = {pool.submit(query_chromosome, conn, chromosome): chromosome
+                      for chromosome in chromosomes}
+            for completed, future in enumerate(as_completed(futures), start=1):
+                chromosome, block = future.result()
+                blocks_by_chrom[chromosome] = block
+                log(f"  [{completed:>2}/{len(chromosomes)}] {chromosome:<6} "
+                    f"{keys_by_chrom[chromosome].height:>9,} keys -> "
+                    f"{block.height:>9,} matched ({perf_counter() - started:.0f}s)")
 
-    frame = pl.concat(blocks, how="vertical") if blocks else pl.DataFrame()
+    # Reassembled in the original chromosome order (not completion order) so the row-order
+    # guarantee downstream -- keys.join(..., how='left').sort('__row') -- does not depend on
+    # which query happened to finish first.
+    frame = (pl.concat([blocks_by_chrom[c] for c in chromosomes], how="vertical")
+             if blocks_by_chrom else pl.DataFrame())
 
     matched = frame.select(pl.col("__row").n_unique()).item()
     duplicates = frame.height - matched
