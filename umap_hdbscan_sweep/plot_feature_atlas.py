@@ -1,31 +1,23 @@
 #!/usr/bin/env python
 """Every column in the source parquets, painted onto the UMAP embedding.
 
-``cohort_cluster_report.py`` colours by a curated list and only ever renders **numerics**.
-``feature_discrimination.py`` already names the cost of that in its own docstring: the five
-most cluster-defining columns in this data (X_PREV1, X_NEXT1, ALT, REF, trinuc192 -- NMI
-0.57-0.76) have no panel at all, while 13 all-null columns each get one. This renders the
-whole schema, categoricals included, so "no panel" stops meaning "no information".
+``cohort_cluster_report.py`` colours by a curated list and only ever renders **numerics**, so
+the context columns (X_PREV1, X_NEXT1, ALT, REF) have no panel at all while all-null columns
+each get one. This renders the whole schema, categoricals included, so "no panel" stops
+meaning "no information".
 
 Two panel types, because one colour scale cannot serve both:
 
-numeric      viridis, clipped to the 1st/99th percentile. The clip is not cosmetic --
-             ``feature_discrimination`` classifies a whole failure mode (SCALE-COMPRESSED)
-             where a long tail eats the palette and a genuinely discriminating feature reads
-             as flat. Matching min->max here would reproduce that artefact by construction.
+numeric      viridis, clipped to the 1st/99th percentile. The clip is not cosmetic: with a
+             min->max scale a long tail eats the palette, so 99% of points land in the bottom
+             few percent of the colormap and a feature that does vary reads as flat.
 categorical  one colour per level from the pipeline's own ``build_palette``, drawn
              largest-level-first with a legend. Levels past ``--max-levels`` collapse into a
              single grey "other", so a 500-level column still yields a readable panel.
 
-Every feature is scored against ``cluster_label`` when the input has one -- eta-squared for
-numerics, normalised mutual information for categoricals -- by importing
-``feature_discrimination``'s functions rather than restating them. The score and its verdict
-go in the panel title, so a flat-looking panel says *why* it is flat on its face.
-
-**Every feature gets a row in ``feature_atlas.csv`` even when its panel is uninformative.**
-That file is the point of the manifest: the sibling module warns that absence of an image is
-not evidence about a feature, and the way to honour that is to never let a feature vanish
-silently.
+Panels are descriptive only -- no discrimination statistics. The title carries the value
+count, the non-null share and the modal share, and ``feature_atlas.csv`` carries the same for
+every feature, so a feature never vanishes silently even when its panel is uninformative.
 
 Efficiency
 ----------
@@ -43,17 +35,19 @@ The cost here is I/O and rasterisation, not arithmetic, so:
 
 Usage::
 
-    # every column already in a finished cell's analysis.parquet -- no extra I/O
+    # the 35 columns already in a finished cell's analysis.parquet -- no extra I/O
     python umap_hdbscan_sweep/plot_feature_atlas.py \\
-        --analysis plots/cohort_reports/<cell>/analysis.parquet \\
-        --output-dir plots/feature_atlas/<cell>
+        --analysis <cell>/analysis.parquet \\
+        --output-dir feature_atlas
 
-    # the full cohort schema, straight from stage 0's dedup parts
+    # all 70 source columns, after recover_source_columns.py has put them in one file
     python umap_hdbscan_sweep/plot_feature_atlas.py \\
-        --embed-summary <stage1>/embed_summary.json \\
-        --coords umap_hdbscan_sweep/umap_tests/hdbscan_scaling/coords.npy \\
-        --labels <cell>/cohort_labels.npy \\
-        --output-dir plots/feature_atlas/cohort
+        --analysis enriched.parquet \\
+        --output-dir feature_atlas_full
+
+Note that every cell's analysis.parquet is identical except ``cluster_label`` -- the sampled
+positions and the UMAP coordinates are drawn once and shared -- so with scoring gone there is
+nothing cell-specific left in these panels. Run this once, not once per cell.
 """
 from __future__ import annotations
 
