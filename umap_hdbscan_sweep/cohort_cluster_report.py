@@ -137,6 +137,14 @@ def parse_args() -> argparse.Namespace:
                         "every cluster")
     p.add_argument("--profile-workers", type=int, default=None,
                    help="processes rendering profile panels (default: min(8, cpu_count))")
+    p.add_argument("--profile-bulk-rows", type=int, default=200_000_000,
+                   help="row-count ceiling for cluster_profiles' single-scan point read. "
+                        "Above it, profiling falls back to one DuckDB query PER CLUSTER over "
+                        "the whole analysis.parquet -- the pattern the single-scan path exists "
+                        "to avoid. The default covers the full 157.5M-row cohort: peak memory "
+                        "for the bulk path is ~24 bytes per assigned row (~3.8 GB at 157.5M), "
+                        "trivial against a modern machine, so there is little reason to lower "
+                        "this unless RAM is tight")
     p.add_argument("--color-columns", default=None,
                    help="comma-separated override of the default colour columns")
     p.add_argument("--source-glob", default=None,
@@ -392,6 +400,7 @@ def build_cell_report(cell: str, cell_dir: Path, out_dir: Path, xy: np.ndarray,
         trinuc192_counts=trinuc192,
         threads=args.threads,
         max_workers=args.profile_workers,
+        bulk_rows=args.profile_bulk_rows,
     )
 
     cell_metrics = {}
