@@ -73,7 +73,11 @@ fi
 REPORTS_DIR="${REPORTS_DIR:-$DEFAULT_REPORTS}"
 SCRIPT="${SCRIPT:-$DEFAULT_SCRIPT}"
 ENRICHED="${ENRICHED:-}"
-ATLAS_SUBDIR="${ATLAS_SUBDIR:-$([ -n "$ENRICHED" ] && echo feature_atlas_enriched || echo feature_atlas)}"
+if [ -z "${ATLAS_SUBDIR:-}" ]; then
+    if [ -n "$ENRICHED" ]; then ATLAS_SUBDIR="feature_atlas_enriched"
+    else ATLAS_SUBDIR="feature_atlas"
+    fi
+fi
 SAMPLE_ROWS="${SAMPLE_ROWS:-0}"
 PARALLEL_JOBS="${PARALLEL_JOBS:-28}"
 WORKERS="${WORKERS:-1}"
