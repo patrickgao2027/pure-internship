@@ -75,7 +75,13 @@ import pyarrow.parquet as pq
 
 from uv_vae.data import connect_duckdb, quote_ident
 
-from stage0_dedup import DEFAULT_ROW_FILTER, IDENTITY_COLUMNS
+# Inlined rather than imported from stage0_dedup: that module lives wherever this repo's
+# umap_hdbscan_sweep/ subtree has been reorganised to on a given host, and neither its
+# location nor its own REPO_ROOT bootstrapping (which assumes a fixed nesting depth) is this
+# script's business just to reach two constants. If DEFAULT_ROW_FILTER ever changes in
+# stage0_dedup.py, change it here too -- CLAUDE.md documents it as the project-wide default.
+DEFAULT_ROW_FILTER = "st = 'MIXED' AND et = 'MIXED' AND FILT = 1"
+IDENTITY_COLUMNS = ["CHROM", "POS", "REF", "ALT"]
 
 # Pipeline outputs, not source columns: carried across from the analysis file untouched.
 PIPELINE_COLUMNS = ["umap_1", "umap_2", "cluster_label", "cluster_probability"]
