@@ -262,7 +262,8 @@ def plot_categorical_distributions(
         # resolve levels: top max_levels by whole-cohort frequency
         raw = frame[col].cast(pl.Utf8).fill_null("__null__")
         level_counts = raw.value_counts(sort=True)
-        top_levels = level_counts[""].to_list()[:max_levels]
+        value_col = [c for c in level_counts.columns if c != "count"][0]
+        top_levels = level_counts[value_col].to_list()[:max_levels]
         has_other = level_counts.height > max_levels
 
         raw_np = raw.to_numpy(allow_copy=True)
