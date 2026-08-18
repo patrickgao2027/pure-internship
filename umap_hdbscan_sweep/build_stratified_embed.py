@@ -112,6 +112,13 @@ def sample_file(conn, filepath: str, rows: int, row_filter: str,
 
 def load_parametric_umap(path: Path, device: torch.device):
     """Load the ParametricEncoder MLP from a .pt checkpoint and return a transform callable."""
+    # parametric_umap.py imports sweep_core and aumap at module level; both live alongside it.
+    # Ensure their directory is on sys.path before the import fires, regardless of how the
+    # process was launched (the top-level insertion uses __file__ of this script, which is the
+    # same directory on miletus but may not have been resolved yet when the import is attempted).
+    _umap_dir = str(Path(__file__).resolve().parent)
+    if _umap_dir not in sys.path:
+        sys.path.insert(0, _umap_dir)
     from parametric_umap import ParametricEncoder, ParametricUmap
 
     payload = torch.load(path, map_location="cpu", weights_only=False)
