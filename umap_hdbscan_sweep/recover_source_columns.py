@@ -209,11 +209,11 @@ def main() -> int:
         # This was the difference between reading ~1/24th of the source and reading all 5.08B
         # rows while a hash table for one chromosome was built underneath it.
         block = cursor.execute(f"""
-            SELECT k."__row", {select_recovered}
+            SELECT k."__row", s.filename AS source_file, {select_recovered}
             FROM {quote_ident(view)} AS k
             JOIN (
-                SELECT *
-                FROM read_parquet({sql_quote(args.source_glob)})
+                SELECT *, filename
+                FROM read_parquet({sql_quote(args.source_glob)}, filename=true)
                 WHERE "CHROM" = {sql_quote(chromosome)}
                   AND ({args.row_filter})
             ) AS s
@@ -260,6 +260,15 @@ def main() -> int:
     merged = (analysis.join(frame, on="__row", how="left")
                       .sort("__row")
                       .drop("__row"))
+
+    # Strip the full filesystem path from source_file, keeping only the stem (e.g. "WS7031").
+    if "source_file" in merged.columns:
+        merged = merged.with_columns(
+            pl.col("source_file").map_elements(
+                lambda p: Path(p).stem if p is not None else None,
+                return_dtype=pl.Utf8,
+            )
+        )
     if merged.height != analysis.height:
         raise SystemExit(f"join produced {merged.height:,} rows from {analysis.height:,}")
 
