@@ -25,7 +25,7 @@ Usage::
 
     python umap_hdbscan_sweep/build_stratified_embed.py \\
         --source-glob '/data/lab/ppmseq_parquets/*.parquet' \\
-        --vae-checkpoint ~/pure-internship/umap_hdbscan_sweep/hdbscan/results/cohort_reports_original/fit25000000_mcs250_ms5_eom/model.pt \\
+        --vae-checkpoint ~/pure-internship/uv_vae/runs/train_multi_20260802T192756Z/training/run_20260802T192814Z/model.pt \\
         --umap-model     ~/pure-internship/umap_hdbscan_sweep/umap/results/final_models/13_BEST_25M_nn15_md0.1_umap.pt \\
         --output         ~/pure-internship/umap_hdbscan_sweep/hdbscan/stratified_9M.parquet \\
         --rows-per-file 100000 --seed 42
