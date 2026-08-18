@@ -77,3 +77,11 @@ parquet_files/
 **/cohort_reports*/**/plots/
 **/cohort_reports*/**/cluster_profiles/
 **/cohort_reports*/**/cluster_profiles_manifest.json
+**/cohort_reports*/**/feature_atlas/
+**/cohort_reports*/**/feature_atlas_enriched/
+**/cohort_reports*/**/feature_distributions/
+**/cohort_reports*/**/*.parquet
+**/cohort_reports*/**/plot_sample.parquet
+**/results/cluster_plots/
+**/results/cluster_sweep_plots/
+**/results/feature_atlas*/
