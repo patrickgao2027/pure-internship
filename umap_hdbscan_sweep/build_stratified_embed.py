@@ -110,29 +110,49 @@ def sample_file(conn, filepath: str, rows: int, row_filter: str,
 
 # ── parametric UMAP loader ─────────────────────────────────────────────────────
 
-def load_parametric_umap(path: Path, device: torch.device):
-    """Load the ParametricEncoder MLP from a .pt checkpoint and return a transform callable."""
-    # parametric_umap.py imports sweep_core and aumap at module level; both live alongside it.
-    # Ensure their directory is on sys.path before the import fires, regardless of how the
-    # process was launched (the top-level insertion uses __file__ of this script, which is the
-    # same directory on miletus but may not have been resolved yet when the import is attempted).
-    _umap_dir = str(Path(__file__).resolve().parent)
-    if _umap_dir not in sys.path:
-        sys.path.insert(0, _umap_dir)
-    from parametric_umap import ParametricEncoder, ParametricUmap
+class _ParametricEncoder(torch.nn.Module):
+    """Minimal copy of ParametricEncoder from parametric_umap.py.
 
+    Defined here to avoid importing parametric_umap.py, which pulls in sweep_core
+    and aumap at module level — both are training-only dependencies not needed for
+    a plain forward-pass inference.  Architecture must stay in sync with the original.
+    """
+    def __init__(self, input_dim: int, output_dim: int = 2,
+                 hidden: tuple = (256, 256, 128)) -> None:
+        super().__init__()
+        layers = []
+        prev = input_dim
+        for w in hidden:
+            layers += [torch.nn.Linear(prev, w), torch.nn.ReLU(inplace=True)]
+            prev = w
+        layers.append(torch.nn.Linear(prev, output_dim))
+        self.net = torch.nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+def load_parametric_umap(path: Path, device: torch.device):
+    """Load encoder weights and return a transform(X, batch_size) callable."""
     payload = torch.load(path, map_location="cpu", weights_only=False)
     state   = payload["state_dict"]
-    # infer input_dim from the first Linear layer's weight (shape: [out, in])
     first_weight = next(v for k, v in state.items() if k.endswith(".weight") and v.ndim == 2)
     input_dim = first_weight.shape[1]
 
-    encoder = ParametricEncoder(input_dim=input_dim)
+    encoder = _ParametricEncoder(input_dim=input_dim)
     encoder.load_state_dict(state)
     encoder.to(device)
     encoder.eval()
 
-    return ParametricUmap(encoder, device, mode=payload.get("mode", "hybrid"))
+    @torch.no_grad()
+    def transform(X: np.ndarray, batch_size: int = 2_000_000) -> np.ndarray:
+        out = []
+        for i in range(0, len(X), batch_size):
+            t = torch.from_numpy(X[i:i + batch_size]).float().to(device)
+            out.append(encoder(t).cpu().numpy())
+        return np.concatenate(out, axis=0)
+
+    return transform
 
 
 # ── main ───────────────────────────────────────────────────────────────────────
@@ -204,7 +224,7 @@ def main() -> int:
     # ── phase 2: parametric UMAP (forward pass only — fast) ───────────────────
     log(f"\n=== phase 2: parametric UMAP transform ({latent_mat.shape[0]:,} points) ===")
     umap_t0 = perf_counter()
-    coords  = umap_model.transform(latent_mat, batch_size=args.umap_batch_size)
+    coords  = umap_model(latent_mat, batch_size=args.umap_batch_size)
     log(f"UMAP done  ({perf_counter()-umap_t0:.0f}s)")
 
     # ── write ──────────────────────────────────────────────────────────────────
