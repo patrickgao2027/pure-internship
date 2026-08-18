@@ -330,3 +330,9 @@ https://docs.rapids.ai/api/cuml/nightly/api/generated/cuml.neighbors.nearestneig
 https://arxiv.org/pdf/1103.2635
 change KNN algorithms to RBC which is faster
 HDSBCAN backend uses KNN to find closest cluster
+
+8/18 columns included
+Expected: 69  In atlas: 69  PNGs: 69
+Numeric: 51  Categorical: 18
+Missing: none
+Extra:   none
