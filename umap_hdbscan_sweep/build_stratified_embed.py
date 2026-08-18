@@ -83,11 +83,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--duckdb-threads", type=int, default=8)
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
     p.add_argument("--feature-spec-path", type=Path, default=None)
-    p.add_argument("--hdbscan-model", type=Path, default=None,
-                   help="optional: path to hdbscan_clusterer.joblib from a param-sweep run. "
-                        "If given, runs approximate_predict on the 2-D UMAP coords and adds "
-                        "cluster_label + cluster_probability columns to the output. "
-                        "Example: .../latent2d_cluster/mcs1000_ms25/hdbscan_clusterer.joblib")
     return p.parse_args()
 
 
@@ -205,40 +200,13 @@ def main() -> int:
     coords  = umap_model.transform(latent_mat, batch_size=args.umap_batch_size)
     log(f"UMAP done  ({perf_counter()-umap_t0:.0f}s)")
 
-    # ── phase 3 (optional): HDBSCAN approximate_predict ──────────────────────
-    cluster_labels: np.ndarray | None = None
-    cluster_probs:  np.ndarray | None = None
-
-    if args.hdbscan_model is not None:
-        import joblib
-        import hdbscan as hdbscan_lib
-
-        log(f"\n=== phase 3: HDBSCAN approximate_predict ===")
-        clusterer = joblib.load(args.hdbscan_model)
-        log(f"  loaded {args.hdbscan_model.name}")
-        try:
-            cluster_labels, cluster_probs = hdbscan_lib.approximate_predict(
-                clusterer, coords.astype(np.float64))
-            cluster_labels = cluster_labels.astype(np.int32)
-            cluster_probs  = cluster_probs.astype(np.float32)
-            n_noise = int((cluster_labels == -1).sum())
-            log(f"  {int((cluster_labels >= 0).sum()):,} clustered  "
-                f"{n_noise:,} noise ({100*n_noise/len(cluster_labels):.1f}%)")
-        except Exception as exc:
-            log(f"  WARNING: approximate_predict failed ({exc}); skipping cluster columns")
-            cluster_labels = cluster_probs = None
-
     # ── write ──────────────────────────────────────────────────────────────────
     log(f"\n=== writing {args.output} ===")
-    data: dict = {
+    result = pl.DataFrame({
         "umap_1":      coords[:, 0].astype(np.float32),
         "umap_2":      coords[:, 1].astype(np.float32),
         "source_file": source_col,
-    }
-    if cluster_labels is not None:
-        data["cluster_label"]       = cluster_labels
-        data["cluster_probability"] = cluster_probs
-    result = pl.DataFrame(data)
+    })
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     result.write_parquet(args.output, compression="zstd")
