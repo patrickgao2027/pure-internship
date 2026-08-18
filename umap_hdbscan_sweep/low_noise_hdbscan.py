@@ -66,7 +66,7 @@ def load_sbs96_matrix(matrix_path: Path) -> tuple[list[str], np.ndarray]:
     """Returns (channel_names, counts) where counts is (96, n_clusters)."""
     frame = pl.read_csv(matrix_path, separator="\t")
     channels = frame[:, 0].to_list()
-    counts = frame.select(frame.columns[1:]).to_numpy().T  # (n_clusters, 96) -> (96, n_clusters)
+    counts = frame.select(frame.columns[1:]).to_numpy()  # (96, n_clusters)
     return channels, counts.astype(np.float32)
 
 
