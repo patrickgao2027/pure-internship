@@ -65,14 +65,43 @@ import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
 
-# Order matters only for consistent colouring across the three figures.
+# Known genotypes get a stable colour so the three figures agree with each other and
+# with earlier runs. The cohort is not fixed, though -- xpc turned up after this table was
+# first written -- so anything unlisted is assigned from FALLBACK_COLOURS on first sight
+# rather than collapsed into "other", which would merge distinct genotypes into one hue.
 GENOTYPE_COLOURS = {
     "wt":    "#3d6fb4",
+    "csa":   "#d18b3c",
     "csb":   "#c4573f",
     "xpa":   "#4f9d69",
+    "xpc":   "#2f7f8f",
+    "xpd":   "#7fa93c",
     "ddb":   "#8a6bab",
     "other": "#8a8a8a",
 }
+FALLBACK_COLOURS = ["#b5793a", "#a8577e", "#6b8f3a", "#7a6ba8", "#3f8f7a",
+                    "#9c6b4f", "#5f7fb5", "#8f8f3a", "#b0506b", "#4a6f8a"]
+_assigned_colours: dict[str, str] = {}
+
+
+def genotype_colour(genotype: str) -> str:
+    """Stable colour for a genotype, whether or not it was known when this was written."""
+    if genotype in GENOTYPE_COLOURS:
+        return GENOTYPE_COLOURS[genotype]
+    if genotype not in _assigned_colours:
+        _assigned_colours[genotype] = FALLBACK_COLOURS[
+            len(_assigned_colours) % len(FALLBACK_COLOURS)]
+    return _assigned_colours[genotype]
+
+
+def genotype_order(present: set[str] | dict) -> list[str]:
+    """Known genotypes in table order first, then any newcomers alphabetically.
+
+    Iterating GENOTYPE_COLOURS alone would silently drop a genotype the table has never
+    heard of, which is exactly the failure this ordering exists to prevent.
+    """
+    known = [g for g in GENOTYPE_COLOURS if g in present]
+    return known + sorted(g for g in present if g not in GENOTYPE_COLOURS)
 # Repair timepoints, earliest first; used for marker size in the centroid figure.
 TIMEPOINT_ORDER = ["0", "R3", "R6", "R9", "R12"]
 
@@ -170,7 +199,7 @@ def plot_sample_contact_sheet(xy: np.ndarray, ids: np.ndarray, names: list[str],
                                  pooled, min_pooled)
         image = draw_enrichment(axis, values, x_edges, y_edges, vmax,
                                 f"{genotype}{timepoint}", 5.0,
-                                GENOTYPE_COLOURS.get(genotype, GENOTYPE_COLOURS["other"]))
+                                genotype_colour(genotype))
 
     figure.suptitle(
         f"Per-sample UMAP density vs cohort average  —  {len(names)} samples, "
@@ -196,7 +225,7 @@ def plot_genotype_enrichment(xy: np.ndarray, ids: np.ndarray, names: list[str],
     groups: dict[str, list[int]] = {}
     for index, name in enumerate(names):
         groups.setdefault(parse_sample_name(name)[0], []).append(index)
-    ordered = [g for g in GENOTYPE_COLOURS if g in groups]
+    ordered = genotype_order(groups)
 
     figure, axes = plt.subplots(1, len(ordered),
                                 figsize=(3.1 * len(ordered), 3.4), squeeze=False)
@@ -207,7 +236,7 @@ def plot_genotype_enrichment(xy: np.ndarray, ids: np.ndarray, names: list[str],
                                  pooled, min_pooled)
         image = draw_enrichment(axes[0][column], values, x_edges, y_edges, vmax,
                                 f"{genotype}  ({len(members)} samples)", 9.0,
-                                GENOTYPE_COLOURS[genotype])
+                                genotype_colour(genotype))
 
     figure.suptitle("UMAP density vs cohort average, pooled by genotype", fontsize=10)
     figure.tight_layout(rect=(0, 0.06, 1, 0.97))
@@ -243,7 +272,7 @@ def plot_genotype_centroids(xy: np.ndarray, ids: np.ndarray, names: list[str],
             continue
         cx, cy = float(points[:, 0].mean()), float(points[:, 1].mean())
         sx, sy = float(points[:, 0].std()), float(points[:, 1].std())
-        colour = GENOTYPE_COLOURS.get(genotype, GENOTYPE_COLOURS["other"])
+        colour = genotype_colour(genotype)
         size = 30.0 + 22.0 * (TIMEPOINT_ORDER.index(timepoint)
                               if timepoint in TIMEPOINT_ORDER else 0)
 
@@ -264,9 +293,9 @@ def plot_genotype_centroids(xy: np.ndarray, ids: np.ndarray, names: list[str],
     axis.grid(True, linewidth=0.3, alpha=0.3)
     axis.legend(
         handles=[Line2D([], [], marker="o", linestyle="", markersize=6,
-                        markerfacecolor=GENOTYPE_COLOURS[g], markeredgecolor="white",
+                        markerfacecolor=genotype_colour(g), markeredgecolor="white",
                         label=g)
-                 for g in seen_genotypes],
+                 for g in genotype_order(set(seen_genotypes))],
         fontsize=8, frameon=False, loc="best", title="genotype", title_fontsize=8,
     )
     figure.tight_layout()
@@ -309,6 +338,21 @@ def main() -> int:
     ids = np.array([lookup.get(value, -1) for value in frame["source_file"].to_list()],
                    dtype=np.int32)
     log(f"  {xy.shape[0]:,} rows, {len(names)} samples")
+
+    # Print the parse so a name the pattern does not understand is visible rather than
+    # quietly pooled into "other" alongside genuinely unrelated samples.
+    parsed = [parse_sample_name(name) for name in names]
+    tally: dict[str, int] = {}
+    for genotype, _ in parsed:
+        tally[genotype] = tally.get(genotype, 0) + 1
+    log("  genotypes: " + ", ".join(f"{g}={tally[g]}" for g in genotype_order(tally)))
+    timepoints = sorted({t for _, t in parsed})
+    log(f"  timepoints: {', '.join(timepoints)}")
+    unparsed = [n for n, (g, t) in zip(names, parsed) if g == "other"]
+    if unparsed:
+        log(f"  WARNING: {len(unparsed)} name(s) did not match "
+            f"{{genotype}}{{timepoint}}-{{replicate}}-ppm{{id}}: {', '.join(unparsed[:5])}"
+            + (" ..." if len(unparsed) > 5 else ""))
 
     x_edges, y_edges = build_grid(xy, args.bins, args.clip_percentile)
     pooled = histogram(xy, x_edges, y_edges)
