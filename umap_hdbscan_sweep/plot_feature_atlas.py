@@ -117,6 +117,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--threads", type=int, default=16)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--no-contact-sheet", action="store_true")
+    p.add_argument("--cluster-labels", type=Path, default=None,
+                   help="analysis.parquet from one HDBSCAN cell; each feature panel gets "
+                        "per-cluster 2-σ ellipses drawn on top to show cluster extents")
+    p.add_argument("--top-contour-clusters", type=int, default=10,
+                   help="clusters to draw ellipses for, ranked by size (default 10)")
     p.add_argument("--output-dir", type=Path, required=True)
     return p.parse_args()
 
@@ -206,11 +211,12 @@ def describe_feature(values_pd, numeric: bool) -> dict:
 _BACKDROP: dict[str, object] = {}
 
 
-def _init_worker(xy, point_size, dpi, cmap) -> None:
+def _init_worker(xy, point_size, dpi, cmap, cluster_ellipses=()) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
-    _BACKDROP.update(xy=xy, point_size=point_size, dpi=dpi, cmap=cmap)
+    _BACKDROP.update(xy=xy, point_size=point_size, dpi=dpi, cmap=cmap,
+                     cluster_ellipses=cluster_ellipses)
 
 
 def _render(task: dict) -> str:
@@ -250,6 +256,18 @@ def _render(task: dict) -> str:
                                   color=NULL_COLOUR, label=f"null ({int(missing.sum()):,})"))
         axis.legend(handles=handles, loc="center left", bbox_to_anchor=(1.02, 0.5),
                     frameon=False, fontsize=8)
+
+    # optional per-cluster 2-σ ellipses (empty list when --cluster-labels not given)
+    ellipses = _BACKDROP.get("cluster_ellipses", ())
+    if ellipses:
+        from matplotlib.patches import Ellipse as _Ellipse
+        for cx, cy, w, h, color, clabel in ellipses:
+            el = _Ellipse((cx, cy), width=w, height=h, fill=False,
+                          edgecolor=color, linewidth=1.2, alpha=0.75, zorder=5)
+            axis.add_patch(el)
+            axis.text(cx, cy, clabel, fontsize=5, ha="center", va="center",
+                      color=color, fontweight="bold", zorder=6,
+                      bbox=dict(boxstyle="round,pad=0.1", fc="white", ec="none", alpha=0.5))
 
     axis.set_xlabel("UMAP 1")
     axis.set_ylabel("UMAP 2")
@@ -346,6 +364,33 @@ def main() -> int:
     if not features.columns:
         raise SystemExit("no feature columns left to plot")
 
+    # Pre-compute per-cluster 2-σ ellipses when a cluster-labels parquet is given.
+    # Each tuple: (cx, cy, 4*std_x, 4*std_y, hex_color, label_str) — 4*std = 2σ diameter.
+    cluster_ellipses: list = []
+    if args.cluster_labels is not None:
+        import matplotlib.cm as _cm
+        import matplotlib.colors as _mc
+        cl_total = pl.scan_parquet(args.cluster_labels).select(pl.len()).collect().item()
+        cl_pos = sample_positions(cl_total, args.sample_rows, args.seed)
+        cl_frame = pl.read_parquet(args.cluster_labels, columns=["cluster_label"])
+        if cl_pos.size < cl_frame.height:
+            cl_frame = cl_frame[cl_pos.tolist()]
+        cl_labels = cl_frame["cluster_label"].to_numpy().astype(np.int32)
+        unique, counts = np.unique(cl_labels[cl_labels >= 0], return_counts=True)
+        top_idx = np.argsort(-counts)[:args.top_contour_clusters]
+        tab = (list(_cm.tab20.colors) + list(_cm.tab20b.colors) + list(_cm.tab20c.colors))
+        for rank, li in enumerate(top_idx):
+            lab = unique[li]
+            mask = cl_labels == lab
+            if mask.sum() < 3:
+                continue
+            pts = xy[mask]
+            cx, cy = float(pts[:, 0].mean()), float(pts[:, 1].mean())
+            sx, sy = float(pts[:, 0].std()), float(pts[:, 1].std())
+            cluster_ellipses.append((cx, cy, 4.0 * sx, 4.0 * sy,
+                                     _mc.to_hex(tab[rank % len(tab)]), f"C{lab}"))
+        log(f"  {len(cluster_ellipses)} cluster ellipses from {args.cluster_labels.name}")
+
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     log(f"preparing {len(features.columns)} features")
@@ -362,7 +407,7 @@ def main() -> int:
     workers = args.workers if args.workers is not None else min(8, os.cpu_count() or 1)
     workers = max(1, min(workers, len(tasks)))
     log(f"rendering {len(tasks)} panels on {workers} worker(s)")
-    initargs = (xy, args.point_size, args.dpi, args.cmap)
+    initargs = (xy, args.point_size, args.dpi, args.cmap, cluster_ellipses)
     if workers == 1:
         _init_worker(*initargs)
         for task in tasks:
