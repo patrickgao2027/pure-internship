@@ -249,6 +249,29 @@ def plot_cosine_heatmap(mat: np.ndarray, labs: list[int],
 
 # ── entry point ────────────────────────────────────────────────────────────────
 
+def make_contact_sheet(umap_paths: list[Path], labels: list[str],
+                       out_path: Path, ncols: int = 7, dpi: int = 120) -> None:
+    """Tile all per-cell cosine-sim UMAPs into one comparison grid."""
+    import math
+    nrows = math.ceil(len(umap_paths) / ncols)
+    fig, axes = plt.subplots(nrows, ncols,
+                              figsize=(ncols * 3.2, nrows * 2.8))
+    axes = np.array(axes).reshape(-1)
+    for i, (path, label) in enumerate(zip(umap_paths, labels)):
+        img = plt.imread(path)
+        axes[i].imshow(img)
+        axes[i].set_title(label, fontsize=6)
+        axes[i].axis("off")
+    for j in range(len(umap_paths), len(axes)):
+        axes[j].axis("off")
+    fig.suptitle("Cosine similarity to cluster centroid — all HDBSCAN parameterisations",
+                 fontsize=10, y=1.002)
+    fig.tight_layout(pad=0.3)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    log(f"contact sheet -> {out_path}  ({nrows}×{ncols}, {len(umap_paths)} cells)")
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -260,9 +283,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--sample-rows", type=int, default=2_000_000)
     p.add_argument("--top-clusters", type=int, default=30,
                    help="clusters to include (by size); rest shown as grey")
-    p.add_argument("--no-heatmap",  action="store_true",
+    p.add_argument("--no-heatmap",    action="store_true",
                    help="skip the cluster×cluster heatmap (faster)")
-    p.add_argument("--point-size",  type=float, default=1.5)
+    p.add_argument("--contact-cols", type=int, default=7,
+                   help="columns in the contact sheet grid (default 7)")
+    p.add_argument("--point-size",   type=float, default=1.5)
     p.add_argument("--dpi",         type=int, default=150)
     p.add_argument("--seed",        type=int, default=42)
     return p.parse_args()
@@ -281,6 +306,9 @@ def main() -> int:
         args.enriched, args.sample_rows, args.seed)
     log(f"  {xy.shape[0]:,} points, {len(feat_names)} numeric features")
 
+    sheet_paths: list[Path] = []
+    sheet_labels: list[str] = []
+
     for i, cell in enumerate(cells, 1):
         title = parse_cell_name(cell)
         log(f"[{i:>2}/{len(cells)}] {cell.name}")
@@ -297,10 +325,12 @@ def main() -> int:
         sim = per_point_cosine_sim(feat, labels, centroids)
 
         cell_out = args.output_dir / cell.name
-        plot_cosine_umap(xy, labels, sim, centroids, title,
-                         cell_out / "cosine_sim_umap.png",
+        umap_out = cell_out / "cosine_sim_umap.png"
+        plot_cosine_umap(xy, labels, sim, centroids, title, umap_out,
                          point_size=args.point_size, dpi=args.dpi)
         log("  cosine_sim_umap.png")
+        sheet_paths.append(umap_out)
+        sheet_labels.append(title)
 
         if not args.no_heatmap:
             mat, labs = cluster_cosine_matrix(centroids)
@@ -308,6 +338,11 @@ def main() -> int:
                                 cell_out / "cluster_cosine_heatmap.png",
                                 dpi=args.dpi)
             log("  cluster_cosine_heatmap.png")
+
+    if sheet_paths:
+        make_contact_sheet(sheet_paths, sheet_labels,
+                           args.output_dir / "cosine_sim_contact_sheet.png",
+                           ncols=args.contact_cols)
 
     return 0
 
