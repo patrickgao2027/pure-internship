@@ -132,9 +132,9 @@ def _l2(v: np.ndarray) -> np.ndarray:
 
 def compute_cluster_centroids(feat: np.ndarray, labels: np.ndarray,
                                top_n: int) -> dict[int, np.ndarray]:
-    """Mean feature vector per cluster (not normalised)."""
+    """Mean feature vector per cluster. top_n=0 means all clusters."""
     unique, counts = np.unique(labels[labels >= 0], return_counts=True)
-    order = np.argsort(-counts)[:top_n]
+    order = np.argsort(-counts) if top_n == 0 else np.argsort(-counts)[:top_n]
     centroids: dict[int, np.ndarray] = {}
     for idx in order:
         lab  = unique[idx]
@@ -282,7 +282,7 @@ def parse_args() -> argparse.Namespace:
                    help="root for output; figures written per cell subdir")
     p.add_argument("--sample-rows", type=int, default=2_000_000)
     p.add_argument("--top-clusters", type=int, default=30,
-                   help="clusters to include (by size); rest shown as grey")
+                   help="clusters to include (by size); 0 = all clusters")
     p.add_argument("--no-heatmap",    action="store_true",
                    help="skip the cluster×cluster heatmap (faster)")
     p.add_argument("--contact-cols", type=int, default=7,
