@@ -97,15 +97,21 @@ def sample_file(conn, filepath: str, rows: int, row_filter: str,
         _local.cursor = conn.cursor()
     cursor = _local.cursor
     col_list = ", ".join(f'"{c}"' for c in feature_names)
+    # Syntax matters: the reservoir(...) form is what accepts REPEATABLE. Plain
+    # "USING SAMPLE n ROWS REPEATABLE (s)" is a parser error in DuckDB.
+    # NOTE: reservoir sampling is only bit-reproducible at threads=1 (see CLAUDE.md).
+    # With --duckdb-threads > 1 the sample is still a valid uniform draw of the
+    # requested size, but re-running will not reproduce the identical row set.
     return cursor.execute(f"""
         SELECT {col_list}
         FROM (
             SELECT {col_list}
-            FROM read_parquet('{filepath}')
+            FROM read_parquet(?)
             WHERE {row_filter}
-        )
-        USING SAMPLE {rows} ROWS REPEATABLE ({seed})
-    """).pl()
+        ) AS filtered_rows
+        USING SAMPLE reservoir({int(rows)} ROWS)
+        REPEATABLE ({int(seed)})
+    """, [filepath]).pl()
 
 
 # ── parametric UMAP loader ─────────────────────────────────────────────────────
