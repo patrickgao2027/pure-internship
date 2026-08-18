@@ -97,18 +97,30 @@ def sample_file(conn, filepath: str, rows: int, row_filter: str,
         _local.cursor = conn.cursor()
     cursor = _local.cursor
     col_list = ", ".join(f'"{c}"' for c in feature_names)
-    # Syntax matters: the reservoir(...) form is what accepts REPEATABLE. Plain
-    # "USING SAMPLE n ROWS REPEATABLE (s)" is a parser error in DuckDB.
+    # Dedup each parquet to 1 row per (CHROM, POS, REF, ALT) using the same ranking
+    # as stage0_dedup.py before reservoir-sampling.  Without this we sample from ~32
+    # reads per locus and the stratified embed is not drawn from the same 157M-row
+    # deduped population the VAE was trained on.
+    #
     # NOTE: reservoir sampling is only bit-reproducible at threads=1 (see CLAUDE.md).
-    # With --duckdb-threads > 1 the sample is still a valid uniform draw of the
-    # requested size, but re-running will not reproduce the identical row set.
+    # With --duckdb-threads > 1 the sample is a valid uniform draw but not identical
+    # across re-runs.
     return cursor.execute(f"""
         SELECT {col_list}
         FROM (
-            SELECT {col_list}
+            SELECT {col_list},
+                   ROW_NUMBER() OVER (
+                       PARTITION BY "CHROM", "POS", "REF", "ALT"
+                       ORDER BY
+                           "QUAL"    DESC NULLS LAST,
+                           "MAPQ"    DESC NULLS LAST,
+                           "DP"      DESC NULLS LAST,
+                           "RAW_VAF" DESC NULLS LAST
+                   ) AS _rn
             FROM read_parquet(?)
             WHERE {row_filter}
-        ) AS filtered_rows
+        ) AS deduped
+        WHERE _rn = 1
         USING SAMPLE reservoir({int(rows)} ROWS)
         REPEATABLE ({int(seed)})
     """, [filepath]).pl()
