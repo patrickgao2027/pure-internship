@@ -38,7 +38,7 @@ from time import perf_counter
 
 REPO_ROOT = next((p for p in Path(__file__).resolve().parents if (p / "uv_vae").is_dir()),
                  Path(__file__).resolve().parents[1])
-for _c in (REPO_ROOT / "uv_vae", REPO_ROOT, Path(__file__).resolve().parent):
+for _c in (REPO_ROOT / "uv_vae" / "scripts", REPO_ROOT / "uv_vae", REPO_ROOT, Path(__file__).resolve().parent):
     if str(_c) not in sys.path:
         sys.path.insert(0, str(_c))
 
@@ -240,7 +240,7 @@ def _sigprofiler_and_plots_worker(kwargs: dict) -> dict:
     ncpus = kwargs["ncpus"]
 
     import sys, importlib
-    for _c in (str(REPO_ROOT / "uv_vae"), str(REPO_ROOT), str(Path(__file__).resolve().parent)):
+    for _c in (str(REPO_ROOT / "uv_vae" / "scripts"), str(REPO_ROOT / "uv_vae"), str(REPO_ROOT), str(Path(__file__).resolve().parent)):
         if _c not in sys.path:
             sys.path.insert(0, _c)
 
