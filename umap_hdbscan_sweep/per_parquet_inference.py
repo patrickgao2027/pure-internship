@@ -66,6 +66,33 @@ def log(msg: str) -> None:
     print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
+def source_fingerprint(path: str) -> dict:
+    """Identity of the source file at the moment it was read.
+
+    file_row_number is positional -- duckdb derives it from physical layout rather than
+    reading it from the file. It therefore keys a join correctly only while the parquet
+    is byte-identical; a rewrite, re-sort or recompaction silently repoints every id at
+    a different read. Recording this lets a later join verify the file it is joining
+    against is the one that was labelled, instead of trusting that nothing changed.
+
+    The hash covers the parquet footer (schema + row-group offsets + row counts), which
+    any rewrite disturbs, rather than the whole multi-GB file.
+    """
+    import hashlib
+    st = os.stat(path)
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        fh.seek(max(0, st.st_size - 1_000_000))
+        h.update(fh.read())
+    return {
+        "path": str(path),
+        "size_bytes": st.st_size,
+        "mtime_ns": st.st_mtime_ns,
+        "footer_sha256": h.hexdigest(),
+        "read_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def release_memory() -> None:
     """Collect, then hand freed arenas back to the OS.
 
@@ -757,9 +784,24 @@ def main() -> int:
             "umap_2": xy[order, 1].astype(np.float32),
             "cluster_label": labels[order],
         }).write_parquet(sample_dir / "row_assignments.parquet")
-        log(f"  row_assignments.parquet written  ({len(rowids):,} rows, "
-            f"file_row_number {rowids.min():,}-{rowids.max():,})")
+        n_assigned = len(rowids)
+        frn_lo, frn_hi = int(rowids.min()), int(rowids.max())
+        log(f"  row_assignments.parquet written  ({n_assigned:,} rows, "
+            f"file_row_number {frn_lo:,}-{frn_hi:,})")
         del xy, labels, rowids, order
+
+        # Provenance for the join: which file these ids refer to, and what it looked
+        # like when it was read.
+        (sample_dir / "source_fingerprint.json").write_text(json.dumps({
+            **source_fingerprint(pq_path),
+            "row_filter": ROW_FILTER,
+            "rows_assigned": n_assigned,
+            "file_row_number_min": frn_lo,
+            "file_row_number_max": frn_hi,
+            "join_key": "file_row_number",
+            "note": "file_row_number is positional; valid only while the source parquet "
+                    "is byte-identical. Verify with verify_source_fingerprint.py.",
+        }, indent=2))
 
         # counts were accumulated per batch during the stream
         present = np.nonzero(counts.sum(axis=0) > 0)[0]
