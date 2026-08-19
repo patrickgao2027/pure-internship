@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import gc
 import glob
+import itertools
 import json
 import multiprocessing as mp
 import os
@@ -63,6 +64,18 @@ TAB_COLOURS = list(plt.cm.tab20.colors) + list(plt.cm.tab20b.colors) + list(plt.
 
 def log(msg: str) -> None:
     print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def rss_gb() -> float:
+    """Resident set size, so a creeping leak shows in the log before it stalls."""
+    try:
+        with open("/proc/self/status") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) / 1024 / 1024
+    except Exception:
+        pass
+    return float("nan")
 
 
 # ── parametric UMAP loader ──────────────────────────────────────────────────────
@@ -110,15 +123,31 @@ def fit_cpu_hdbscan(coords: np.ndarray, fit_indices: np.ndarray,
 
 ROW_FILTER = "st = 'MIXED' AND et = 'MIXED' AND FILT = 1"
 
-def load_and_filter_parquet(parquet_path: str, max_rows: int | None = None) -> pl.DataFrame:
+SBS96_COLUMNS = ["REF", "ALT", "X_PREV1", "X_NEXT1"]
+
+
+def load_and_filter_parquet(parquet_path: str, columns: list[str] | None = None,
+                            max_rows: int | None = None,
+                            memory_limit: str | None = None) -> pl.DataFrame:
+    """Filtered rows, reading only the columns downstream actually touches.
+
+    SELECT * pulled all ~70 columns when the VAE needs its feature-spec subset and
+    SBS96 needs four more; the unused string columns dominated resident memory on a
+    50M-row sample.
+    """
     import duckdb
     limit_clause = f"LIMIT {max_rows}" if max_rows else ""
+    select = "*" if not columns else ", ".join(f'"{c}"' for c in columns)
     conn = duckdb.connect()
+    if memory_limit:
+        conn.execute(f"SET memory_limit='{memory_limit}'")
     arrow = conn.execute(
-        f"SELECT * FROM read_parquet('{parquet_path}') WHERE {ROW_FILTER} {limit_clause}"
+        f"SELECT {select} FROM read_parquet('{parquet_path}') WHERE {ROW_FILTER} {limit_clause}"
     ).arrow()
     conn.close()
-    return pl.from_arrow(arrow)
+    frame = pl.from_arrow(arrow)
+    del arrow
+    return frame
 
 
 # ── SBS96 helpers ───────────────────────────────────────────────────────────────
@@ -140,24 +169,42 @@ def _normalize_context(ref: str, alt: str, prev1: str, next1: str) -> str | None
 
 
 
-def frame_to_sbs96_index(frame: pl.DataFrame, channel_map: dict[str, int]) -> np.ndarray:
-    """Map each row to its SBS96 channel index using the provided channel_map.
+_BYTE2CODE = np.full(256, 4, dtype=np.uint8)   # anything not ACGT -> 4 ("N")
+for _i, _b in enumerate(b"ACGT"):
+    _BYTE2CODE[_b] = _i
+_CODE2CHAR = ["A", "C", "G", "T", "N"]
 
-    channel_map must be built from the row_order returned by
-    rvcp.write_uv_only_signature_database so the resulting matrix rows match the
-    signature database ordering exactly.
+
+def build_sbs96_lut(channel_map: dict[str, int]) -> np.ndarray:
+    """625-entry table over (prev, ref, alt, next) codes, each 0-4.
+
+    Built by calling _normalize_context on every combination, so the mapping is the
+    same one the row-wise version applied -- just evaluated 625 times up front instead
+    of once per read.
     """
-    n = len(frame)
-    out = np.full(n, -1, dtype=np.int8)
-    refs = frame["REF"].to_list()
-    alts = frame["ALT"].to_list()
-    prevs = frame["X_PREV1"].to_list()
-    nxts = frame["X_NEXT1"].to_list()
-    for i in range(n):
-        ch = _normalize_context(refs[i], alts[i], prevs[i], nxts[i])
+    lut = np.full(625, -1, dtype=np.int8)
+    for p, r, a, n in itertools.product(range(5), repeat=4):
+        ch = _normalize_context(_CODE2CHAR[r], _CODE2CHAR[a], _CODE2CHAR[p], _CODE2CHAR[n])
         if ch is not None:
-            out[i] = channel_map.get(ch, -1)
-    return out
+            lut[((p * 5 + r) * 5 + a) * 5 + n] = channel_map.get(ch, -1)
+    return lut
+
+
+def _base_codes(column) -> np.ndarray:
+    return _BYTE2CODE[np.asarray(column, dtype="S1").view(np.uint8)]
+
+
+def frame_to_sbs96_index(frame: pl.DataFrame, lut: np.ndarray) -> np.ndarray:
+    """Map each row to its SBS96 channel index via the precomputed lookup table.
+
+    The row-wise version this replaces called .to_list() on four columns, which
+    materialised ~4 x n Python str objects (~10 GB per 50M-row sample) that CPython
+    does not return to the OS -- RSS grew every sample until the loader thrashed.
+    Staying in numpy keeps the whole step at ~n bytes.
+    """
+    r, a = _base_codes(frame["REF"]), _base_codes(frame["ALT"])
+    p, n = _base_codes(frame["X_PREV1"]), _base_codes(frame["X_NEXT1"])
+    return lut[((p.astype(np.int32) * 5 + r) * 5 + a) * 5 + n]
 
 
 def sbs96_counts(sbs96_idx: np.ndarray, labels: np.ndarray,
@@ -407,6 +454,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--cosmic-version", default="3.5")
     p.add_argument("--sigprofiler-cpu", type=int, default=4, help="CPUs per SigProfiler job")
     p.add_argument("--n-workers", type=int, default=4, help="parallel SigProfiler+plot workers")
+    p.add_argument("--duckdb-memory-limit", default="32GB",
+                   help="DuckDB memory_limit per load; it otherwise takes 80%% of RAM "
+                        "and competes with the frame it is materialising.")
     p.add_argument("--gpu-budget-gb", type=float, default=44.0,
                    help="GPU budget for this process; RMM gets 0.9 of it. The library "
                         "default is 16 GB, too small for a 48 GB card.")
@@ -445,6 +495,7 @@ def main() -> int:
     row_order = rvcp.write_uv_only_signature_database(
         args.genome_build, args.cosmic_version, sig_db)
     channel_map = {ch: i for i, ch in enumerate(row_order)}
+    sbs96_lut = build_sbs96_lut(channel_map)
     log(f"SigProfiler DB: {sig_db.name}  ({len(row_order)} channels)")
 
     # ── HDBSCAN model: reuse the cohort model, don't refit ──────────────────────
@@ -546,6 +597,18 @@ def main() -> int:
     inf = LatentInference.from_checkpoint(args.checkpoint, feature_spec_path=args.feature_spec)
     log("  VAE loaded")
 
+    # Read only the columns that are actually consumed: the VAE's own feature columns
+    # plus the four SBS96 context columns. Derived from the loaded specs rather than
+    # hardcoded, so a feature-spec change cannot silently drop an input column.
+    read_columns = None
+    try:
+        spec_columns = list(inf.feature_names)
+        read_columns = sorted(set(spec_columns) | set(SBS96_COLUMNS))
+        log(f"  reading {len(read_columns)} columns "
+            f"({len(spec_columns)} feature + {len(SBS96_COLUMNS)} SBS96 context)")
+    except Exception as exc:  # noqa: BLE001
+        log(f"  WARNING: could not derive column subset ({exc}); reading all columns")
+
     # ── per-sample GPU pipeline ──────────────────────────────────────────────────
     worker_jobs: list[dict] = []
 
@@ -559,13 +622,14 @@ def main() -> int:
             log(f"[{idx+1}/{len(parquet_files)}] {sample_name}  SKIP (done)")
             continue
 
-        log(f"[{idx+1}/{len(parquet_files)}] {sample_name}")
+        log(f"[{idx+1}/{len(parquet_files)}] {sample_name}   (RSS {rss_gb():.1f} GB)")
 
         # load + filter
         log(f"  loading {pq_path} …")
         t0 = perf_counter()
         try:
-            frame = load_and_filter_parquet(pq_path)
+            frame = load_and_filter_parquet(pq_path, columns=read_columns,
+                                            memory_limit=args.duckdb_memory_limit)
         except Exception as exc:
             log(f"  ERROR loading: {exc}")
             continue
@@ -613,7 +677,7 @@ def main() -> int:
         # SBS96 matrix
         log("  building SBS96 matrix …")
         t0 = perf_counter()
-        sbs96_idx = frame_to_sbs96_index(frame, channel_map)
+        sbs96_idx = frame_to_sbs96_index(frame, sbs96_lut)
         del frame
         counts = sbs96_counts(sbs96_idx, labels, n_cohort_clusters)
         del sbs96_idx, labels
