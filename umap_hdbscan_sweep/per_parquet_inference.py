@@ -453,9 +453,29 @@ def main() -> int:
         log(f"  model saved → {hdbscan_model_path.name}")
         del coords
 
-    import hdbscan as hdbscan_pkg
     n_cohort_clusters = int(clusterer.labels_.max()) + 1 if (clusterer.labels_ >= 0).any() else 0
     log(f"HDBSCAN model: {n_cohort_clusters} cohort clusters")
+
+    # ── build fast_predict tables + index once (reused across all samples) ───────
+    import fast_predict as _fp
+    _fit_coords_for_index = np.load(args.coords, mmap_mode="r")
+    _rng_idx = np.random.default_rng(args.seed)
+    _fit_idx = np.sort(_rng_idx.choice(_fit_coords_for_index.shape[0],
+                                        size=min(args.fit_rows, _fit_coords_for_index.shape[0]),
+                                        replace=False))
+    _fit_coords_fp = np.ascontiguousarray(_fit_coords_for_index[_fit_idx], dtype=np.float32)
+    del _fit_coords_for_index
+
+    _predict_backend = "rbc"
+    try:
+        import cuml  # noqa: F401
+    except ImportError:
+        _predict_backend = "sklearn"
+        log("cuML not available, fast_predict will use sklearn KDTree backend")
+
+    _fp_tables = _fp.build_tables(clusterer, len(_fit_idx), args.ms)
+    _fp_index  = _fp.build_index(_fit_coords_fp, 2 * args.ms, _predict_backend)
+    log(f"fast_predict tables+index built  backend={_predict_backend}")
 
     # ── load parametric UMAP encoder ────────────────────────────────────────────
     log(f"Loading parametric UMAP encoder from {Path(args.umap_model).name} …")
@@ -515,10 +535,13 @@ def main() -> int:
         log(f"  UMAP done  {xy.shape}  in {perf_counter()-t0:.1f}s")
         del latent
 
-        # HDBSCAN approximate_predict
-        log("  HDBSCAN approximate_predict …")
+        # HDBSCAN predict via fast_predict (RBC GPU or sklearn KDTree fallback)
+        log(f"  HDBSCAN fast_predict ({_predict_backend}) …")
         t0 = perf_counter()
-        labels, probs = hdbscan_pkg.approximate_predict(clusterer, xy.astype(np.float64))
+        labels, probs = _fp.predict(
+            _fp_tables, _fit_coords_fp,
+            np.ascontiguousarray(xy, dtype=np.float32),
+            backend=_predict_backend, batch_rows=5_000_000, index=_fp_index)
         labels = labels.astype(np.int32)
         n_sample_clusters = int(labels.max()) + 1 if (labels >= 0).any() else 0
         noise_pct = (labels < 0).mean() * 100
