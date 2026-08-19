@@ -179,13 +179,20 @@ def stream_filtered_parquet(parquet_path: str, columns: list[str] | None,
     Streaming makes peak memory a function of rows_per_batch instead of sample size.
     """
     import duckdb
-    select = "*" if not columns else ", ".join(f'"{c}"' for c in columns)
+    # file_row_number is the physical row index in the source file. It is what makes the
+    # outputs joinable back: positional correspondence between the label array and the
+    # parquet is NOT guaranteed (duckdb parallelises the scan across row groups), and
+    # re-deriving identity later is the mistake recover_source_columns.py exists to undo.
+    cols = ["file_row_number"] + (list(columns) if columns else [])
+    select = ", ".join(f'"{c}"' if c != "file_row_number" else c for c in cols) if columns else \
+             "file_row_number, *"
     conn = duckdb.connect()
     try:
         if memory_limit:
             conn.execute(f"SET memory_limit='{memory_limit}'")
         result = conn.execute(
-            f"SELECT {select} FROM read_parquet('{parquet_path}') WHERE {ROW_FILTER}")
+            f"SELECT {select} FROM read_parquet('{parquet_path}', file_row_number=true) "
+            f"WHERE {ROW_FILTER}")
         # fetch_record_batch is deprecated in favour of to_arrow_reader; miletus and
         # tosun run different duckdb versions, so prefer the new name and fall back
         # rather than pinning. Both take the batch size positionally.
@@ -685,6 +692,7 @@ def main() -> int:
         t0 = perf_counter()
         label_parts: list[np.ndarray] = []
         xy_parts: list[np.ndarray] = []
+        rowid_parts: list[np.ndarray] = []
         counts = np.zeros((96, n_cohort_clusters), dtype=np.int64)
         n_rows = 0
         try:
@@ -693,6 +701,9 @@ def main() -> int:
                                                  args.duckdb_memory_limit):
                 if batch.height == 0:
                     continue
+                # Keep the source row id, then hand the VAE only its feature columns.
+                rowid_parts.append(batch["file_row_number"].to_numpy().astype(np.int64))
+                batch = batch.drop("file_row_number")
                 latent = inf.encode_frame(batch, batch_size=args.encode_batch)
                 xy = umap_transform(umap_encoder, latent.astype(np.float32),
                                     batch_size=args.umap_batch, device=device)
@@ -713,8 +724,8 @@ def main() -> int:
                     log(f"    {n_rows:,} rows  (RSS {rss_gb():.1f} GB)")
         except Exception as exc:
             log(f"  ERROR streaming: {type(exc).__name__}: {exc}")
-            del label_parts, xy_parts
-            gc.collect()
+            del label_parts, xy_parts, rowid_parts
+            release_memory()
             continue
 
         if n_rows == 0:
@@ -725,15 +736,30 @@ def main() -> int:
 
         labels = np.concatenate(label_parts) if len(label_parts) > 1 else label_parts[0]
         xy = np.concatenate(xy_parts) if len(xy_parts) > 1 else xy_parts[0]
-        del label_parts, xy_parts
+        rowids = np.concatenate(rowid_parts) if len(rowid_parts) > 1 else rowid_parts[0]
+        del label_parts, xy_parts, rowid_parts
         n_sample_clusters = int(labels.max()) + 1 if (labels >= 0).any() else 0
         noise_pct = (labels < 0).mean() * 100
         log(f"  {n_sample_clusters} clusters  {noise_pct:.1f}% noise")
 
-        # save labels + coords for worker
+        # save labels + coords for worker (streaming order, positional)
         np.save(sample_dir / "labels.npy", labels)
         np.save(sample_dir / "umap_coords.npy", xy)
-        del xy, labels
+
+        # The joinable artefact: keyed on the source file's physical row number, sorted
+        # so a merge against read_parquet(..., file_row_number=true) is a straight
+        # equi-join. Rows the filter dropped are simply absent -- no placeholder rows,
+        # and no assumption that array position means anything.
+        order = np.argsort(rowids, kind="stable")
+        pl.DataFrame({
+            "file_row_number": rowids[order],
+            "umap_1": xy[order, 0].astype(np.float32),
+            "umap_2": xy[order, 1].astype(np.float32),
+            "cluster_label": labels[order],
+        }).write_parquet(sample_dir / "row_assignments.parquet")
+        log(f"  row_assignments.parquet written  ({len(rowids):,} rows, "
+            f"file_row_number {rowids.min():,}-{rowids.max():,})")
+        del xy, labels, rowids, order
 
         # counts were accumulated per batch during the stream
         present = np.nonzero(counts.sum(axis=0) > 0)[0]
