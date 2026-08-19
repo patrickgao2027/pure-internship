@@ -46,6 +46,8 @@ COSMIC_VERSION="${COSMIC_VERSION:-3.5}"
 N_WORKERS="${N_WORKERS:-4}"
 SIGPROFILER_CPU="${SIGPROFILER_CPU:-4}"
 DEVICE="${DEVICE:-auto}"
+GPU_BUDGET_GB="${GPU_BUDGET_GB:-44}"              # 48 GB card; RMM takes 0.9 of this
+PREDICT_BATCH_ROWS="${PREDICT_BATCH_ROWS:-5000000}"  # ~1.2 GB peak on the GPU
 
 # ── log setup ───────────────────────────────────────────────────────────────────
 mkdir -p "$OUTPUT_DIR"
@@ -96,6 +98,8 @@ python "$SCRIPT_DIR/per_parquet_inference.py" \
     --n-workers       "$N_WORKERS" \
     --sigprofiler-cpu "$SIGPROFILER_CPU" \
     --device          "$DEVICE" \
+    --gpu-budget-gb   "$GPU_BUDGET_GB" \
+    --predict-batch-rows "$PREDICT_BATCH_ROWS" \
     $MODEL_ARGS \
     $SKIP_DONE_FLAG \
     2>&1 | tee -a "$LOG"

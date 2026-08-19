@@ -406,6 +406,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--cosmic-version", default="3.5")
     p.add_argument("--sigprofiler-cpu", type=int, default=4, help="CPUs per SigProfiler job")
     p.add_argument("--n-workers", type=int, default=4, help="parallel SigProfiler+plot workers")
+    p.add_argument("--gpu-budget-gb", type=float, default=44.0,
+                   help="GPU budget for this process; RMM gets 0.9 of it. The library "
+                        "default is 16 GB, too small for a 48 GB card.")
+    p.add_argument("--predict-batch-rows", type=int, default=5_000_000,
+                   help="rows per fast_predict batch. Peak GPU is ~240 B/row, so 5M "
+                        "holds it near 1.2 GB. Lower this if RBC still OOMs.")
     p.add_argument("--umap-input-dim", type=int, default=16)
     p.add_argument("--umap-batch", type=int, default=65536)
     p.add_argument("--skip-done", action="store_true",
@@ -509,7 +515,10 @@ def main() -> int:
     try:
         import cuml  # noqa: F401
         import sweep_core
-        sweep_core.apply_gpu_budget("sweep", require_free=False)
+        # resolve_budget_gb defaults to 16 GB, which on a 48 GB card leaves RMM at
+        # 16*0.9 = 14.4 GB. Ask for the real card instead.
+        sweep_core.apply_gpu_budget("sweep", budget_gb=args.gpu_budget_gb,
+                                    require_free=False)
     except ImportError:
         _predict_backend = "sklearn"
         log("cuML not available, fast_predict will use sklearn KDTree backend")
@@ -582,7 +591,7 @@ def main() -> int:
         labels, probs = _fp.predict(
             _fp_tables, _fit_coords_fp,
             np.ascontiguousarray(xy, dtype=np.float32),
-            backend=_predict_backend, batch_rows=100_000_000, index=_fp_index)
+            backend=_predict_backend, batch_rows=args.predict_batch_rows, index=_fp_index)
         labels = labels.astype(np.int32)
         n_sample_clusters = int(labels.max()) + 1 if (labels >= 0).any() else 0
         noise_pct = (labels < 0).mean() * 100
