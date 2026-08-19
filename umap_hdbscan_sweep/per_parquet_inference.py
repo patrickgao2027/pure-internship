@@ -541,7 +541,7 @@ def main() -> int:
         labels, probs = _fp.predict(
             _fp_tables, _fit_coords_fp,
             np.ascontiguousarray(xy, dtype=np.float32),
-            backend=_predict_backend, batch_rows=5_000_000, index=_fp_index)
+            backend=_predict_backend, batch_rows=1_000_000, index=_fp_index)
         labels = labels.astype(np.int32)
         n_sample_clusters = int(labels.max()) + 1 if (labels >= 0).any() else 0
         noise_pct = (labels < 0).mean() * 100
