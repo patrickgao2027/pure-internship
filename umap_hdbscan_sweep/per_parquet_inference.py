@@ -454,6 +454,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--cosmic-version", default="3.5")
     p.add_argument("--sigprofiler-cpu", type=int, default=4, help="CPUs per SigProfiler job")
     p.add_argument("--n-workers", type=int, default=4, help="parallel SigProfiler+plot workers")
+    p.add_argument("--encode-chunk-rows", type=int, default=5_000_000,
+                   help="rows per VAE encode slice. transform_frame materialises "
+                        "full-frame tensors, so this bounds them. 0 disables slicing.")
+    p.add_argument("--encode-batch", type=int, default=4096,
+                   help="GPU forward-pass batch inside each encode slice")
     p.add_argument("--duckdb-memory-limit", default="32GB",
                    help="DuckDB memory_limit per load; it otherwise takes 80%% of RAM "
                         "and competes with the frame it is materialising.")
@@ -634,7 +639,7 @@ def main() -> int:
             log(f"  ERROR loading: {exc}")
             continue
         n_rows = len(frame)
-        log(f"  {n_rows:,} rows in {perf_counter()-t0:.1f}s")
+        log(f"  {n_rows:,} rows in {perf_counter()-t0:.1f}s  (RSS {rss_gb():.1f} GB)")
         if n_rows == 0:
             log("  no rows after filter, skipping")
             continue
@@ -642,12 +647,26 @@ def main() -> int:
         # VAE encode
         log("  VAE encode …")
         t0 = perf_counter()
+        # Encode in slices. LatentInference.encode_frame runs transform_frame over the
+        # WHOLE frame before it batches, so a 50M-row sample builds full-frame
+        # categorical + numeric tensors (~7 GB) that sit alongside the frame and the
+        # accumulating latent. batch_size only bounds the GPU forward pass, not this.
         try:
-            latent = inf.encode_frame(frame, batch_size=4096)
+            chunk = args.encode_chunk_rows
+            if chunk and n_rows > chunk:
+                parts = []
+                for start in range(0, n_rows, chunk):
+                    sub = frame.slice(start, chunk)
+                    parts.append(inf.encode_frame(sub, batch_size=args.encode_batch))
+                    del sub
+                latent = np.concatenate(parts, axis=0)
+                del parts
+            else:
+                latent = inf.encode_frame(frame, batch_size=args.encode_batch)
         except Exception as exc:
             log(f"  ERROR encoding: {exc}")
             continue
-        log(f"  encoded {latent.shape}  in {perf_counter()-t0:.1f}s")
+        log(f"  encoded {latent.shape}  in {perf_counter()-t0:.1f}s  (RSS {rss_gb():.1f} GB)")
 
         # parametric UMAP
         log("  parametric UMAP transform …")
