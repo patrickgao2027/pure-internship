@@ -399,7 +399,11 @@ def main() -> int:
     model_path = out / "hdbscan_model.pkl"
     try:
         joblib.dump(clusterer, model_path)
-        log(f"  model saved → {model_path.name}")
+        # The fit indices travel with the model: fast_predict's tables index into the fit
+        # set positionally, so any consumer (per_parquet_inference) needs these exact rows
+        # in this exact order rather than re-deriving them and hoping the seed matched.
+        np.save(out / "fit_indices.npy", fit_indices)
+        log(f"  model + fit_indices saved → {model_path.name}")
     except Exception as exc:
         log(f"  WARNING: model save failed ({exc})")
 

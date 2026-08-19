@@ -29,8 +29,14 @@ COORDS="${COORDS:-$HOME/pure-internship/umap_hdbscan_sweep/hdbscan/results/hdbsc
 CONTEXT="${CONTEXT:-$HOME/pure-internship/uv_vae/runs/train_multi_20260802T192756Z/stage1_embed/context.parquet}"
 OUTPUT_DIR="${OUTPUT_DIR:-$HOME/pure-internship/umap_hdbscan_sweep/per_parquet_inference}"
 
+# Reuse the cohort HDBSCAN from low_noise_hdbscan.py rather than refitting here, so
+# per-sample labels are directly comparable to the cohort run. Set HDBSCAN_MODEL="" to
+# make this script fit its own model with MCS/MS/EPSILON below.
+HDBSCAN_MODEL="${HDBSCAN_MODEL:-$HOME/pure-internship/umap_hdbscan_sweep/low_noise_hdbscan/hdbscan_model.pkl}"
+FIT_INDICES="${FIT_INDICES:-$HOME/pure-internship/umap_hdbscan_sweep/low_noise_hdbscan/fit_indices.npy}"
+
 MCS="${MCS:-2500}"
-MS="${MS:-15}"
+MS="${MS:-1}"          # low-noise config; ignored when HDBSCAN_MODEL is set
 EPSILON="${EPSILON:-0.05}"
 FIT_ROWS="${FIT_ROWS:-1000000}"
 SEED="${SEED:-42}"
@@ -60,6 +66,18 @@ if [ "${SKIP_DONE:-0}" = "1" ]; then
     SKIP_DONE_FLAG="--skip-done"
 fi
 
+MODEL_ARGS=""
+if [ -n "$HDBSCAN_MODEL" ]; then
+    if [ ! -f "$HDBSCAN_MODEL" ]; then
+        echo "ERROR: HDBSCAN_MODEL not found: $HDBSCAN_MODEL" | tee -a "$LOG"
+        echo "  Run tmux_low_noise_hdbscan.sh first, or set HDBSCAN_MODEL=\"\" to fit here." | tee -a "$LOG"
+        exit 1
+    fi
+    MODEL_ARGS="--hdbscan-model $HDBSCAN_MODEL"
+    [ -f "$FIT_INDICES" ] && MODEL_ARGS="$MODEL_ARGS --fit-indices $FIT_INDICES"
+    echo "  hdbscan_model:  $HDBSCAN_MODEL" | tee -a "$LOG"
+fi
+
 python "$SCRIPT_DIR/per_parquet_inference.py" \
     --parquet-glob    "$PARQUET_GLOB" \
     --checkpoint      "$CHECKPOINT" \
@@ -78,6 +96,7 @@ python "$SCRIPT_DIR/per_parquet_inference.py" \
     --n-workers       "$N_WORKERS" \
     --sigprofiler-cpu "$SIGPROFILER_CPU" \
     --device          "$DEVICE" \
+    $MODEL_ARGS \
     $SKIP_DONE_FLAG \
     2>&1 | tee -a "$LOG"
 

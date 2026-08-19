@@ -387,7 +387,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--checkpoint", required=True, help="path to model.pt VAE checkpoint")
     p.add_argument("--feature-spec", required=True, help="path to ml_features.json")
     p.add_argument("--umap-model", required=True, help="path to parametric UMAP .pt file")
-    p.add_argument("--coords", required=True, help="cohort coords.npy for re-fitting HDBSCAN")
+    p.add_argument("--coords", required=True,
+                   help="cohort coords.npy -- the space the HDBSCAN model lives in")
+    p.add_argument("--hdbscan-model", default=None,
+                   help="joblib .pkl of an already-fitted HDBSCAN (e.g. the low-noise "
+                        "cohort model). Without this the script fits its own.")
+    p.add_argument("--fit-indices", default=None,
+                   help="fit_indices.npy the model was fit on. Defaults to "
+                        "fit_indices.npy beside --hdbscan-model.")
     p.add_argument("--context", required=True, help="context.parquet for sbs96_index")
     p.add_argument("--output-dir", required=True)
     p.add_argument("--mcs", type=int, default=2500)
@@ -433,38 +440,70 @@ def main() -> int:
     channel_map = {ch: i for i, ch in enumerate(row_order)}
     log(f"SigProfiler DB: {sig_db.name}  ({len(row_order)} channels)")
 
-    # ── fit HDBSCAN on cohort coords (CPU for serialisability) ──────────────────
-    hdbscan_model_path = out / f"hdbscan_mcs{args.mcs}_ms{args.ms}_eps{args.epsilon:.3f}.pkl"
+    # ── HDBSCAN model: reuse the cohort model, don't refit ──────────────────────
+    # fast_predict.build_tables/build_index need the EXACT fit set the model was fit on,
+    # in the same row order -- the tables index into it positionally. So the fit indices
+    # travel with the model rather than being re-derived from (seed, fit_rows) and hoped
+    # to match: a silent mismatch would relabel every read against the wrong neighbours.
     import joblib
-    if hdbscan_model_path.exists():
-        log(f"Loading existing HDBSCAN model from {hdbscan_model_path.name}")
-        clusterer = joblib.load(hdbscan_model_path)
+    coords = np.load(args.coords, mmap_mode="r")
+
+    if args.hdbscan_model:
+        model_path = Path(args.hdbscan_model)
+        if not model_path.exists():
+            log(f"ERROR: --hdbscan-model not found: {model_path}")
+            return 1
+        log(f"Loading HDBSCAN model: {model_path}")
+        clusterer = joblib.load(model_path)
+
+        idx_path = Path(args.fit_indices) if args.fit_indices else model_path.parent / "fit_indices.npy"
+        if idx_path.exists():
+            fit_idx = np.load(idx_path)
+            log(f"  fit indices from {idx_path.name}  ({len(fit_idx):,} rows)")
+        else:
+            # Fall back to the shared derivation both scripts use. Only valid when the
+            # model really was fit with this seed/fit_rows, so make that check loud.
+            fit_idx = np.sort(np.random.default_rng(args.seed).choice(
+                coords.shape[0], size=min(args.fit_rows, coords.shape[0]), replace=False))
+            log(f"  WARNING: {idx_path.name} absent; re-deriving fit indices from "
+                f"seed={args.seed} fit_rows={args.fit_rows}")
+            n_model = getattr(clusterer, "labels_", np.empty(0)).shape[0]
+            if n_model != len(fit_idx):
+                log(f"ERROR: model was fit on {n_model:,} rows but the derived index has "
+                    f"{len(fit_idx):,}. Pass --fit-indices with the model's own indices.")
+                return 1
     else:
-        log("Loading cohort coords for HDBSCAN fit …")
-        coords = np.load(args.coords, mmap_mode="r")
-        rng = np.random.default_rng(args.seed)
-        fit_idx = np.sort(rng.choice(coords.shape[0], size=min(args.fit_rows, coords.shape[0]), replace=False))
-        log(f"Fitting CPU HDBSCAN on {len(fit_idx):,} rows  (mcs={args.mcs} ms={args.ms}) …")
-        t0 = perf_counter()
-        clusterer = fit_cpu_hdbscan(coords, fit_idx, args.mcs, args.ms, args.epsilon)
-        log(f"  {perf_counter()-t0:.1f}s  {int(clusterer.labels_.max())+1} clusters  "
-            f"{(clusterer.labels_<0).mean()*100:.1f}% noise")
-        joblib.dump(clusterer, hdbscan_model_path)
-        log(f"  model saved → {hdbscan_model_path.name}")
-        del coords
+        model_path = out / f"hdbscan_mcs{args.mcs}_ms{args.ms}_eps{args.epsilon:.3f}.pkl"
+        idx_path = out / "fit_indices.npy"
+        if model_path.exists() and idx_path.exists():
+            log(f"Loading existing HDBSCAN model from {model_path.name}")
+            clusterer = joblib.load(model_path)
+            fit_idx = np.load(idx_path)
+        else:
+            fit_idx = np.sort(np.random.default_rng(args.seed).choice(
+                coords.shape[0], size=min(args.fit_rows, coords.shape[0]), replace=False))
+            log(f"Fitting CPU HDBSCAN on {len(fit_idx):,} rows  (mcs={args.mcs} ms={args.ms}) …")
+            t0 = perf_counter()
+            clusterer = fit_cpu_hdbscan(coords, fit_idx, args.mcs, args.ms, args.epsilon)
+            log(f"  {perf_counter()-t0:.1f}s  {int(clusterer.labels_.max())+1} clusters  "
+                f"{(clusterer.labels_<0).mean()*100:.1f}% noise")
+            joblib.dump(clusterer, model_path)
+            np.save(idx_path, fit_idx)
+            log(f"  model + fit_indices saved → {out}")
 
     n_cohort_clusters = int(clusterer.labels_.max()) + 1 if (clusterer.labels_ >= 0).any() else 0
-    log(f"HDBSCAN model: {n_cohort_clusters} cohort clusters")
+    log(f"HDBSCAN model: {n_cohort_clusters} cohort clusters, fit on {len(fit_idx):,} rows")
+
+    # min_samples must be the model's own, not the CLI default: build_tables uses it for
+    # the core-distance estimate and build_index for k=2*ms.
+    model_ms = int(getattr(clusterer, "min_samples", None) or getattr(clusterer, "min_cluster_size", args.ms))
+    if model_ms != args.ms:
+        log(f"  using model's min_samples={model_ms} (CLI --ms {args.ms} ignored)")
 
     # ── build fast_predict tables + index once (reused across all samples) ───────
     import fast_predict as _fp
-    _fit_coords_for_index = np.load(args.coords, mmap_mode="r")
-    _rng_idx = np.random.default_rng(args.seed)
-    _fit_idx = np.sort(_rng_idx.choice(_fit_coords_for_index.shape[0],
-                                        size=min(args.fit_rows, _fit_coords_for_index.shape[0]),
-                                        replace=False))
-    _fit_coords_fp = np.ascontiguousarray(_fit_coords_for_index[_fit_idx], dtype=np.float32)
-    del _fit_coords_for_index
+    _fit_coords_fp = np.ascontiguousarray(coords[fit_idx], dtype=np.float32)
+    del coords
 
     _predict_backend = "rbc"
     try:
@@ -475,9 +514,9 @@ def main() -> int:
         _predict_backend = "sklearn"
         log("cuML not available, fast_predict will use sklearn KDTree backend")
 
-    _fp_tables = _fp.build_tables(clusterer, len(_fit_idx), args.ms)
-    _fp_index  = _fp.build_index(_fit_coords_fp, 2 * args.ms, _predict_backend)
-    log(f"fast_predict tables+index built  backend={_predict_backend}")
+    _fp_tables = _fp.build_tables(clusterer, len(fit_idx), model_ms)
+    _fp_index  = _fp.build_index(_fit_coords_fp, 2 * model_ms, _predict_backend)
+    log(f"fast_predict tables+index built  backend={_predict_backend}  k={2*model_ms}")
 
     # ── load parametric UMAP encoder ────────────────────────────────────────────
     log(f"Loading parametric UMAP encoder from {Path(args.umap_model).name} …")
