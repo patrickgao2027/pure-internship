@@ -540,7 +540,7 @@ def main() -> int:
         # Lazy import: cluster_quality lives in umap_hdbscan_sweep/ (same dir as this
         # script). If sys.path doesn't reach it for any reason, record the error and
         # continue rather than crashing the whole run.
-        sys.path.insert(0, str(_SCRIPT_DIR))
+        sys.path.insert(0, str(_SCRIPT_DIR / "hdbscan"))
         try:
             import cluster_quality
         except ImportError as _e:
