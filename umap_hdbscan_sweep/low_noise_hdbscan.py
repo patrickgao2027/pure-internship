@@ -29,9 +29,9 @@ from time import perf_counter
 
 REPO_ROOT = next((p for p in Path(__file__).resolve().parents if (p / "uv_vae").is_dir()),
                  Path(__file__).resolve().parents[1])
+_SCRIPT_DIR = Path(__file__).resolve().parent
 for _c in (REPO_ROOT / "uv_vae", REPO_ROOT, REPO_ROOT / "uv_vae" / "scripts",
-           REPO_ROOT / "umap_hdbscan_sweep",
-           Path(__file__).resolve().parent):
+           REPO_ROOT / "umap_hdbscan_sweep", _SCRIPT_DIR):
     if str(_c) not in sys.path:
         sys.path.insert(0, str(_c))
 
@@ -537,7 +537,20 @@ def main() -> int:
     # sweep spreadsheet with identical column semantics. Each is diagnostic-only:
     # a failure is recorded and swallowed rather than losing the fit above.
     if not args.skip_metrics:
-        import cluster_quality
+        # Lazy import: cluster_quality lives in umap_hdbscan_sweep/ (same dir as this
+        # script). If sys.path doesn't reach it for any reason, record the error and
+        # continue rather than crashing the whole run.
+        sys.path.insert(0, str(_SCRIPT_DIR))
+        try:
+            import cluster_quality
+        except ImportError as _e:
+            log(f"  cluster_quality not found on sys.path: {_e}")
+            log(f"  sys.path = {sys.path[:8]}")
+            record["geometry_error"] = f"ImportError: {_e}"
+            args.skip_metrics = True
+        if not args.skip_metrics:
+            pass  # continues below
+    if not args.skip_metrics:
         log("Scoring geometry (DBCV, relative validity, connectivity) …")
         t0 = perf_counter()
         try:
