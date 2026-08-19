@@ -559,7 +559,7 @@ def main() -> int:
             "sbs96_matrix_path": str(matrix_path),
             "labels_path": str(sample_dir / "labels.npy"),
             "xy_path": str(sample_dir / "umap_coords.npy"),
-            "row_order": channels,
+            "row_order": row_order,
             "n_clusters": n_cohort_clusters,
             "genome_build": args.genome_build,
             "cosmic_version": args.cosmic_version,
