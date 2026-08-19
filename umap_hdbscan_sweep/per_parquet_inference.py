@@ -499,7 +499,7 @@ def main() -> int:
         log("  VAE encode …")
         t0 = perf_counter()
         try:
-            latent = inf.encode(frame)
+            latent = inf.encode_frame(frame, batch_size=4096)
         except Exception as exc:
             log(f"  ERROR encoding: {exc}")
             continue
