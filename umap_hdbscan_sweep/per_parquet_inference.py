@@ -30,6 +30,7 @@ import gc
 import glob
 import json
 import multiprocessing as mp
+import os
 import re
 import sys
 from datetime import datetime, timezone
@@ -515,9 +516,16 @@ def main() -> int:
     try:
         import cuml  # noqa: F401
         import sweep_core
-        # resolve_budget_gb defaults to 16 GB, which on a 48 GB card leaves RMM at
-        # 16*0.9 = 14.4 GB. Ask for the real card instead.
-        sweep_core.apply_gpu_budget("sweep", budget_gb=args.gpu_budget_gb,
+        # Stage "apply", not "sweep": this process loads torch (VAE + UMAP encoder)
+        # alongside cuML, so the budget has to be split (rmm_share 0.5) rather than
+        # handed to RMM whole.
+        #
+        # Pin the budget in the environment too. gpu_budget.apply() computes torch's
+        # share as (budget - rmm_pool); LatentInference.from_checkpoint calls it again
+        # with no argument, and the 16 GB default against an already-reserved RMM pool
+        # yields a negative fraction and a ValueError.
+        os.environ["UV_VAE_GPU_MEM_GB"] = str(args.gpu_budget_gb)
+        sweep_core.apply_gpu_budget("apply", budget_gb=args.gpu_budget_gb,
                                     require_free=False)
     except ImportError:
         _predict_backend = "sklearn"
