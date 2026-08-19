@@ -469,13 +469,8 @@ def main() -> int:
     _predict_backend = "rbc"
     try:
         import cuml  # noqa: F401
-        import rmm
-        # Default RMM pool cap is 4 GB regardless of available VRAM.
-        # Reinitialize with 40 GB so the 50M-row kneighbors call fits.
-        rmm.reinitialize(pool_allocator=True,
-                         initial_pool_size=2 * 1024**3,
-                         maximum_pool_size=40 * 1024**3)
-        log("RMM pool reinitialized: max 40 GB")
+        import sweep_core
+        sweep_core.apply_gpu_budget("sweep", require_free=False)
     except ImportError:
         _predict_backend = "sklearn"
         log("cuML not available, fast_predict will use sklearn KDTree backend")
