@@ -25,7 +25,7 @@ PARQUET_GLOB="${PARQUET_GLOB:-/data/lab/ppmseq_parquets/*.parquet}"
 CHECKPOINT="${CHECKPOINT:-$HOME/pure-internship/uv_vae/runs/train_multi_20260802T192756Z/training/run_20260802T192814Z/model.pt}"
 FEATURE_SPEC="${FEATURE_SPEC:-$HOME/pure-internship/uv_vae/ml_features.json}"
 UMAP_MODEL="${UMAP_MODEL:-$HOME/pure-internship/umap_hdbscan_sweep/umap/results/final_models/13_BEST_25M_nn15_md0.1_umap.pt}"
-COORDS="${COORDS:-$HOME/pure-internship/umap_hdbscan_sweep/umap_tests/hdbscan_scaling/coords.npy}"
+COORDS="${COORDS:-$HOME/pure-internship/umap_hdbscan_sweep/hdbscan/results/hdbscan_scaling/coords.npy}"
 CONTEXT="${CONTEXT:-$HOME/pure-internship/uv_vae/runs/train_multi_20260802T192756Z/stage1_embed/context.parquet}"
 OUTPUT_DIR="${OUTPUT_DIR:-$HOME/pure-internship/umap_hdbscan_sweep/per_parquet_inference}"
 

@@ -73,9 +73,14 @@ def load_sbs96_matrix(matrix_path: Path) -> tuple[list[str], np.ndarray]:
 def load_sigprofiler_stats(stats_path: Path) -> dict[int, float]:
     """cluster_id -> cosine similarity from Assignment_Solution_Samples_Stats.txt."""
     frame = pl.read_csv(stats_path, separator="\t")
+    # SigProfiler names this column "Sample Names" in Samples_Stats but "Samples" in
+    # Activities -- take whichever is present rather than assuming.
+    name_col = next((c for c in ("Sample Names", "Samples") if c in frame.columns), None)
+    if name_col is None:
+        return {}
     out = {}
     for row in frame.iter_rows(named=True):
-        m = re.search(r"(\d+)$", str(row.get("Samples", "")))
+        m = re.search(r"(\d+)$", str(row.get(name_col, "")))
         if m:
             cos = row.get("Cosine Similarity", None)
             if cos is not None:
@@ -96,6 +101,41 @@ def load_activities(act_path: Path) -> tuple[dict[int, str], list[str]]:
         if counts.sum() > 0:
             out[int(m.group(1))] = sig_cols[int(np.argmax(counts))]
     return out, list(sig_cols)
+
+
+def write_summary_row(record: dict, path: Path) -> None:
+    """One row in the sweep spreadsheet's column vocabulary.
+
+    Same names and units as ``hdbscan_param_sweep.aggregate`` produces so this run can be
+    pasted straight into the comparison sheet next to the swept cells.
+    """
+    g = record.get("geometry", {})
+    a = record.get("assignment", {})
+    s = record.get("spectrum", {})
+
+    def pct(value):
+        return None if value is None else round(100 * value, 2)
+
+    row = {
+        "label": f"low_noise_mcs{record['mcs']}_ms{record['ms']}_eps{record['epsilon']}",
+        "fit_rows": record["fit_rows"],
+        "mcs": record["mcs"],
+        "ms": record["ms"],
+        "eps": record["epsilon"],
+        "n_clusters": record.get("cohort_n_clusters"),
+        "noise_pct": pct(record.get("cohort_noise_fraction")),
+        "dbcv": g.get("dbcv"),
+        "rel_val": g.get("relative_validity"),
+        "neg_dbcv_pct": pct(g.get("dbcv_frac_clusters_negative")),
+        "cos_mean": a.get("cosine_mean"),
+        "mut_gt08_pct": pct(a.get("mutation_share_above_08")),
+        "top_chan": s.get("top_channel_share_median"),
+        "l1_res_pct": a.get("l1_pct_mean"),
+        "fit_s": record.get("fit_seconds"),
+        "label_s": record.get("label_seconds"),
+    }
+    pl.DataFrame({k: [v] for k, v in row.items()}).write_csv(path)
+    log(f"summary_row.csv written")
 
 
 def dominant_substitution(channels: list[str], counts: np.ndarray) -> dict[int, str]:
@@ -302,6 +342,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--threads", type=int, default=1, help="CPU threads for CPU hdbscan")
     p.add_argument("--skip-sigprofiler", action="store_true")
     p.add_argument("--skip-plots", action="store_true")
+    p.add_argument("--skip-metrics", action="store_true",
+                   help="skip the geometry/assignment/spectrum summarisers")
+    # DBCV / connectivity budgets -- same defaults as hdbscan_param_sweep so the numbers
+    # are comparable against the swept cells.
+    p.add_argument("--connectivity-rows", type=int, default=200_000)
+    p.add_argument("--dbcv-rows", type=int, default=25_000)
+    p.add_argument("--dbcv-per-cluster", type=int, default=400,
+                   help="points drawn from EVERY cluster; 0 falls back to --dbcv-rows total")
+    p.add_argument("--dbcv-backend", default="auto", choices=["auto", "kdbcv", "hdbscan"])
     p.add_argument("--dpi", type=int, default=150)
     return p.parse_args()
 
@@ -392,6 +441,12 @@ def main() -> int:
     np.save(out / "cohort_labels.npy", labels)
     np.save(out / "cohort_probabilities.npy", probabilities)
 
+    # plot_feature_atlas.py --cluster-labels wants a parquet with a `cluster_label` column
+    # in full-cohort row order (it does its own positional sampling), not the .npy.
+    cluster_labels_parquet = out / "cluster_labels.parquet"
+    pl.DataFrame({"cluster_label": labels}).write_parquet(cluster_labels_parquet)
+    log(f"  cluster_labels.parquet written for the feature atlas")
+
     # ── model artefacts ─────────────────────────────────────────────────────────
     for name, attr, dtype in [("cluster_persistence", "cluster_persistence_", np.float64),
                                ("outlier_scores", "outlier_scores_", np.float32)]:
@@ -468,13 +523,66 @@ def main() -> int:
             output=str(sigprof_root / "output"),
             signature_database=str(sig_db),
             genome_build=args.genome_build, cosmic_version=float(args.cosmic_version),
-            make_plots=False, collapse_to_SBS96=True, connected_sigs=False, verbose=False,
+            make_plots=True, collapse_to_SBS96=True, connected_sigs=False, verbose=False,
             input_type="matrix", context_type="96", export_probabilities=True,
             sample_reconstruction_plots=False, cpu=args.sigprofiler_cpu,
             add_background_signatures=False,
         )
         record["sigprofiler_seconds"] = round(perf_counter() - t0, 1)
         log(f"  SigProfiler done in {record['sigprofiler_seconds']}s")
+
+    # ── geometry / assignment / spectrum metrics ────────────────────────────────
+    # The same three summarisers hdbscan_param_sweep uses, so this run lands in the
+    # sweep spreadsheet with identical column semantics. Each is diagnostic-only:
+    # a failure is recorded and swallowed rather than losing the fit above.
+    if not args.skip_metrics:
+        import cluster_quality
+        log("Scoring geometry (DBCV, relative validity, connectivity) …")
+        t0 = perf_counter()
+        try:
+            probs_fit = getattr(clusterer, "probabilities_", None)
+            record["geometry"] = cluster_quality.summarise(
+                fit_coords, fit_labels,
+                probabilities=None if probs_fit is None else _to_host(probs_fit),
+                clusterer=clusterer,
+                connectivity_rows=args.connectivity_rows,
+                dbcv_rows=args.dbcv_rows,
+                dbcv_max_clusters=None,
+                dbcv_stratified=True,
+                dbcv_per_cluster=args.dbcv_per_cluster or None,
+                dbcv_backend=args.dbcv_backend,
+                seed=args.seed)
+            record["geometry_seconds"] = round(perf_counter() - t0, 1)
+            g = record["geometry"]
+            log(f"  DBCV {g.get('dbcv')}  rel_validity {g.get('relative_validity')}  "
+                f"neg-DBCV {100 * g.get('dbcv_frac_clusters_negative', float('nan')):.1f}%")
+        except Exception as exc:  # noqa: BLE001
+            record["geometry_error"] = f"{type(exc).__name__}: {exc}"
+            log(f"  geometry metrics failed: {type(exc).__name__}: {str(exc)[:200]}")
+
+        if sigprof_root is not None:
+            import assignment_metrics
+            import spectrum_metrics
+            stats_path = (sigprof_root / "output" / "Assignment_Solution" / "Solution_Stats"
+                          / "Assignment_Solution_Samples_Stats.txt")
+            try:
+                if stats_path.exists():
+                    record["assignment"] = assignment_metrics.summarise(stats_path)
+                    a = record["assignment"]
+                    log(f"  cos_mean {a.get('cosine_mean'):.4f}  "
+                        f"mut>0.8 {100 * a.get('mutation_share_above_08', 0):.2f}%  "
+                        f"L1res {a.get('l1_pct_mean'):.1f}%")
+            except Exception as exc:  # noqa: BLE001
+                record["assignment_error"] = f"{type(exc).__name__}: {exc}"
+                log(f"  assignment metrics failed: {type(exc).__name__}: {str(exc)[:200]}")
+            try:
+                record["spectrum"] = spectrum_metrics.summarise(matrix_path, seed=args.seed)
+                log(f"  top_chan {record['spectrum'].get('top_channel_share_median'):.4f}")
+            except Exception as exc:  # noqa: BLE001
+                record["spectrum_error"] = f"{type(exc).__name__}: {exc}"
+                log(f"  spectrum metrics failed: {type(exc).__name__}: {str(exc)[:200]}")
+
+        write_summary_row(record, out / "summary_row.csv")
 
     (out / "metrics.json").write_text(json.dumps(record, indent=2))
     log(f"metrics.json written")

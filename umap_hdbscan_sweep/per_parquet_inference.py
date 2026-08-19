@@ -263,7 +263,7 @@ def _sigprofiler_and_plots_worker(kwargs: dict) -> dict:
             output=str(sigprof_dir / "output"),
             signature_database=str(sig_db),
             genome_build=genome_build, cosmic_version=float(cosmic_version),
-            make_plots=False, collapse_to_SBS96=True, connected_sigs=False, verbose=False,
+            make_plots=True, collapse_to_SBS96=True, connected_sigs=False, verbose=False,
             input_type="matrix", context_type="96", export_probabilities=True,
             sample_reconstruction_plots=False, cpu=ncpus,
             add_background_signatures=False,
@@ -279,8 +279,10 @@ def _sigprofiler_and_plots_worker(kwargs: dict) -> dict:
         dom_sig_map: dict[int, str] = {}
         if stats_path.exists():
             frame = pl.read_csv(stats_path, separator="\t")
-            for row in frame.iter_rows(named=True):
-                m = re.search(r"(\d+)$", str(row.get("Samples", "")))
+            # Samples_Stats calls it "Sample Names"; Activities calls it "Samples".
+            name_col = next((c for c in ("Sample Names", "Samples") if c in frame.columns), None)
+            for row in (frame.iter_rows(named=True) if name_col else []):
+                m = re.search(r"(\d+)$", str(row.get(name_col, "")))
                 if m:
                     cosine_map[int(m.group(1))] = float(row.get("Cosine Similarity", 0))
         if act_path.exists():

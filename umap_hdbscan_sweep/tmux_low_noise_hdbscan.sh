@@ -23,7 +23,7 @@ elif command -v conda &>/dev/null; then
 fi
 
 # ── default paths (miletus) ─────────────────────────────────────────────────────
-COORDS="${COORDS:-$HOME/pure-internship/umap_hdbscan_sweep/umap_tests/hdbscan_scaling/coords.npy}"
+COORDS="${COORDS:-$HOME/pure-internship/umap_hdbscan_sweep/hdbscan/results/hdbscan_scaling/coords.npy}"
 CONTEXT="${CONTEXT:-$HOME/pure-internship/uv_vae/runs/train_multi_20260802T192756Z/stage1_embed/context.parquet}"
 OUTPUT_DIR="${OUTPUT_DIR:-$HOME/pure-internship/umap_hdbscan_sweep/low_noise_hdbscan}"
 
@@ -78,5 +78,22 @@ python "$SCRIPT_DIR/low_noise_hdbscan.py" \
     --predict-backend "$PREDICT_BACKEND" \
     $SBS96_ARG \
     2>&1 | tee -a "$LOG"
+
+# ── feature atlas over the low-noise labels ─────────────────────────────────────
+# Panels are the feature values themselves (cluster-independent); what the low-noise
+# run contributes is the per-cluster 2-sigma ellipse overlay.
+if [ "${SKIP_ATLAS:-0}" != "1" ]; then
+    ATLAS_DIR="${ATLAS_DIR:-$OUTPUT_DIR/feature_atlas}"
+    EMBED_SUMMARY="${EMBED_SUMMARY:-$HOME/pure-internship/uv_vae/runs/train_multi_20260802T192756Z/stage1_embed/embed_summary.json}"
+    echo "===== feature atlas  $(date -u) =====" | tee -a "$LOG"
+    sed -i 's/\r$//' "$SCRIPT_DIR/plot_feature_atlas.py" 2>/dev/null || true
+    python "$SCRIPT_DIR/plot_feature_atlas.py" \
+        --embed-summary   "$EMBED_SUMMARY" \
+        --coords          "$COORDS" \
+        --cluster-labels  "$OUTPUT_DIR/cluster_labels.parquet" \
+        --output-dir      "$ATLAS_DIR" \
+        --seed            "$SEED" \
+        2>&1 | tee -a "$LOG"
+fi
 
 echo "===== DONE  $(date -u) =====" | tee -a "$LOG"
