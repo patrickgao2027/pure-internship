@@ -523,7 +523,7 @@ def main() -> int:
             output=str(sigprof_root / "output"),
             signature_database=str(sig_db),
             genome_build=args.genome_build, cosmic_version=float(args.cosmic_version),
-            make_plots=True, collapse_to_SBS96=True, connected_sigs=False, verbose=False,
+            make_plots=False, collapse_to_SBS96=True, connected_sigs=False, verbose=False,
             input_type="matrix", context_type="96", export_probabilities=True,
             sample_reconstruction_plots=False, cpu=args.sigprofiler_cpu,
             add_background_signatures=False,

@@ -263,7 +263,7 @@ def _sigprofiler_and_plots_worker(kwargs: dict) -> dict:
             output=str(sigprof_dir / "output"),
             signature_database=str(sig_db),
             genome_build=genome_build, cosmic_version=float(cosmic_version),
-            make_plots=True, collapse_to_SBS96=True, connected_sigs=False, verbose=False,
+            make_plots=False, collapse_to_SBS96=True, connected_sigs=False, verbose=False,
             input_type="matrix", context_type="96", export_probabilities=True,
             sample_reconstruction_plots=False, cpu=ncpus,
             add_background_signatures=False,
