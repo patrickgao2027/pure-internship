@@ -30,6 +30,7 @@ from time import perf_counter
 REPO_ROOT = next((p for p in Path(__file__).resolve().parents if (p / "uv_vae").is_dir()),
                  Path(__file__).resolve().parents[1])
 for _c in (REPO_ROOT / "uv_vae", REPO_ROOT, REPO_ROOT / "uv_vae" / "scripts",
+           REPO_ROOT / "umap_hdbscan_sweep",
            Path(__file__).resolve().parent):
     if str(_c) not in sys.path:
         sys.path.insert(0, str(_c))
