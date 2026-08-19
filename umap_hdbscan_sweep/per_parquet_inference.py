@@ -66,6 +66,26 @@ def log(msg: str) -> None:
     print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
+def release_memory() -> None:
+    """Collect, then hand freed arenas back to the OS.
+
+    glibc's allocator keeps freed blocks on its own free lists, so RSS stayed at
+    51 GB between samples even after every large object was dropped. malloc_trim
+    is what actually returns them; without it the next sample's allocation grows
+    the heap instead of reusing the space.
+    """
+    gc.collect()
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+    try:
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
 def rss_gb() -> float:
     """Resident set size, so a creeping leak shows in the log before it stalls."""
     try:
@@ -148,6 +168,34 @@ def load_and_filter_parquet(parquet_path: str, columns: list[str] | None = None,
     frame = pl.from_arrow(arrow)
     del arrow
     return frame
+
+
+def stream_filtered_parquet(parquet_path: str, columns: list[str] | None,
+                            rows_per_batch: int, memory_limit: str | None = None):
+    """Filtered rows in batches, never materialising the whole sample.
+
+    The cohort is not uniform: samples range from ~50M rows to 226M+, and the largest
+    do not fit in RAM as a single frame no matter how the downstream steps are batched.
+    Streaming makes peak memory a function of rows_per_batch instead of sample size.
+    """
+    import duckdb
+    select = "*" if not columns else ", ".join(f'"{c}"' for c in columns)
+    conn = duckdb.connect()
+    try:
+        if memory_limit:
+            conn.execute(f"SET memory_limit='{memory_limit}'")
+        result = conn.execute(
+            f"SELECT {select} FROM read_parquet('{parquet_path}') WHERE {ROW_FILTER}")
+        # fetch_record_batch is deprecated in favour of to_arrow_reader; miletus and
+        # tosun run different duckdb versions, so prefer the new name and fall back
+        # rather than pinning. Both take the batch size positionally.
+        make_reader = getattr(result, "to_arrow_reader", None)
+        reader = (make_reader(rows_per_batch) if make_reader is not None
+                  else result.fetch_record_batch(rows_per_batch))
+        for batch in reader:
+            yield pl.from_arrow(batch)
+    finally:
+        conn.close()
 
 
 # ── SBS96 helpers ───────────────────────────────────────────────────────────────
@@ -454,9 +502,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--cosmic-version", default="3.5")
     p.add_argument("--sigprofiler-cpu", type=int, default=4, help="CPUs per SigProfiler job")
     p.add_argument("--n-workers", type=int, default=4, help="parallel SigProfiler+plot workers")
-    p.add_argument("--encode-chunk-rows", type=int, default=5_000_000,
-                   help="rows per VAE encode slice. transform_frame materialises "
-                        "full-frame tensors, so this bounds them. 0 disables slicing.")
+    p.add_argument("--stream-batch-rows", type=int, default=5_000_000,
+                   help="rows per streaming batch through encode/UMAP/predict/count. "
+                        "Peak memory tracks this, not the sample size -- the cohort "
+                        "ranges from ~50M to 226M+ rows per file.")
     p.add_argument("--encode-batch", type=int, default=4096,
                    help="GPU forward-pass batch inside each encode slice")
     p.add_argument("--duckdb-memory-limit", default="32GB",
@@ -629,78 +678,64 @@ def main() -> int:
 
         log(f"[{idx+1}/{len(parquet_files)}] {sample_name}   (RSS {rss_gb():.1f} GB)")
 
-        # load + filter
-        log(f"  loading {pq_path} …")
+        # Stream the sample: encode -> project -> label -> count, one batch at a time.
+        # Nothing sample-sized is ever resident except the outputs (labels ~4 B/row,
+        # coords ~8 B/row), so a 226M-row file costs the same peak as a 50M-row one.
+        log(f"  streaming {pq_path} …")
         t0 = perf_counter()
+        label_parts: list[np.ndarray] = []
+        xy_parts: list[np.ndarray] = []
+        counts = np.zeros((96, n_cohort_clusters), dtype=np.int64)
+        n_rows = 0
         try:
-            frame = load_and_filter_parquet(pq_path, columns=read_columns,
-                                            memory_limit=args.duckdb_memory_limit)
+            for batch in stream_filtered_parquet(pq_path, read_columns,
+                                                 args.stream_batch_rows,
+                                                 args.duckdb_memory_limit):
+                if batch.height == 0:
+                    continue
+                latent = inf.encode_frame(batch, batch_size=args.encode_batch)
+                xy = umap_transform(umap_encoder, latent.astype(np.float32),
+                                    batch_size=args.umap_batch, device=device)
+                del latent
+                lab, _prob = _fp.predict(
+                    _fp_tables, _fit_coords_fp,
+                    np.ascontiguousarray(xy, dtype=np.float32),
+                    backend=_predict_backend, batch_rows=args.predict_batch_rows,
+                    index=_fp_index)
+                lab = lab.astype(np.int32)
+                counts += sbs96_counts(frame_to_sbs96_index(batch, sbs96_lut),
+                                       lab, n_cohort_clusters)
+                label_parts.append(lab)
+                xy_parts.append(np.asarray(xy, dtype=np.float32))
+                n_rows += batch.height
+                del batch, xy, lab
+                if (n_rows // max(args.stream_batch_rows, 1)) % 10 == 0:
+                    log(f"    {n_rows:,} rows  (RSS {rss_gb():.1f} GB)")
         except Exception as exc:
-            log(f"  ERROR loading: {exc}")
+            log(f"  ERROR streaming: {type(exc).__name__}: {exc}")
+            del label_parts, xy_parts
+            gc.collect()
             continue
-        n_rows = len(frame)
-        log(f"  {n_rows:,} rows in {perf_counter()-t0:.1f}s  (RSS {rss_gb():.1f} GB)")
+
         if n_rows == 0:
             log("  no rows after filter, skipping")
             continue
+        log(f"  {n_rows:,} rows encoded+projected+labelled in {perf_counter()-t0:.1f}s"
+            f"  (RSS {rss_gb():.1f} GB)")
 
-        # VAE encode
-        log("  VAE encode …")
-        t0 = perf_counter()
-        # Encode in slices. LatentInference.encode_frame runs transform_frame over the
-        # WHOLE frame before it batches, so a 50M-row sample builds full-frame
-        # categorical + numeric tensors (~7 GB) that sit alongside the frame and the
-        # accumulating latent. batch_size only bounds the GPU forward pass, not this.
-        try:
-            chunk = args.encode_chunk_rows
-            if chunk and n_rows > chunk:
-                parts = []
-                for start in range(0, n_rows, chunk):
-                    sub = frame.slice(start, chunk)
-                    parts.append(inf.encode_frame(sub, batch_size=args.encode_batch))
-                    del sub
-                latent = np.concatenate(parts, axis=0)
-                del parts
-            else:
-                latent = inf.encode_frame(frame, batch_size=args.encode_batch)
-        except Exception as exc:
-            log(f"  ERROR encoding: {exc}")
-            continue
-        log(f"  encoded {latent.shape}  in {perf_counter()-t0:.1f}s  (RSS {rss_gb():.1f} GB)")
-
-        # parametric UMAP
-        log("  parametric UMAP transform …")
-        t0 = perf_counter()
-        xy = umap_transform(umap_encoder, latent.astype(np.float32),
-                            batch_size=args.umap_batch, device=device)
-        log(f"  UMAP done  {xy.shape}  in {perf_counter()-t0:.1f}s")
-        del latent
-
-        # HDBSCAN predict via fast_predict (RBC GPU or sklearn KDTree fallback)
-        log(f"  HDBSCAN fast_predict ({_predict_backend}) …")
-        t0 = perf_counter()
-        labels, probs = _fp.predict(
-            _fp_tables, _fit_coords_fp,
-            np.ascontiguousarray(xy, dtype=np.float32),
-            backend=_predict_backend, batch_rows=args.predict_batch_rows, index=_fp_index)
-        labels = labels.astype(np.int32)
+        labels = np.concatenate(label_parts) if len(label_parts) > 1 else label_parts[0]
+        xy = np.concatenate(xy_parts) if len(xy_parts) > 1 else xy_parts[0]
+        del label_parts, xy_parts
         n_sample_clusters = int(labels.max()) + 1 if (labels >= 0).any() else 0
         noise_pct = (labels < 0).mean() * 100
-        log(f"  {n_sample_clusters} clusters  {noise_pct:.1f}% noise  in {perf_counter()-t0:.1f}s")
+        log(f"  {n_sample_clusters} clusters  {noise_pct:.1f}% noise")
 
         # save labels + coords for worker
         np.save(sample_dir / "labels.npy", labels)
         np.save(sample_dir / "umap_coords.npy", xy)
-        del xy
+        del xy, labels
 
-        # SBS96 matrix
-        log("  building SBS96 matrix …")
-        t0 = perf_counter()
-        sbs96_idx = frame_to_sbs96_index(frame, sbs96_lut)
-        del frame
-        counts = sbs96_counts(sbs96_idx, labels, n_cohort_clusters)
-        del sbs96_idx, labels
-
+        # counts were accumulated per batch during the stream
         present = np.nonzero(counts.sum(axis=0) > 0)[0]
         cluster_cols = [f"cluster_{int(c)}" for c in present]
         counts_present = counts[:, present]
@@ -715,7 +750,7 @@ def main() -> int:
         log(f"  SBS96 matrix written  ({counts_present.sum():,} mutations)")
         del counts
 
-        gc.collect()
+        release_memory()
 
         worker_jobs.append({
             "sample_name": sample_name,
