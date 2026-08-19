@@ -221,13 +221,12 @@ def plot_grid_dominance(xy: np.ndarray, grid: dict, out_path: Path, dpi: int,
         handles=[mpatches.Patch(facecolor=genotype_colour(g), label=g)
                  for g in sorted(seen, key=lambda x: list(GENOTYPE_COLOURS).index(x)
                                  if x in GENOTYPE_COLOURS else 99)],
-        fontsize=9, frameon=False, title="plurality genotype", title_fontsize=9,
+        fontsize=9, frameon=False, title="genotype prefix", title_fontsize=9,
     )
     axis.set_xlabel("UMAP 1")
     axis.set_ylabel("UMAP 2")
     axis.set_title(
-        f"Plurality {'genotype' if mode == 'genotype' else 'sample'} per UMAP region\n"
-        f"colour strength = how dominant the plurality is  ({bins}×{bins} grid)",
+        f"Most common genotype prefix per UMAP region  ({bins}×{bins} grid)",
         fontsize=10,
     )
     figure.tight_layout()
@@ -270,11 +269,11 @@ def plot_cluster_centroids(xy: np.ndarray, labels: np.ndarray, genotypes: np.nda
         handles=[mpatches.Patch(facecolor=genotype_colour(g), label=g)
                  for g in sorted(seen, key=lambda x: list(GENOTYPE_COLOURS).index(x)
                                  if x in GENOTYPE_COLOURS else 99)],
-        fontsize=9, frameon=False, title="plurality genotype", title_fontsize=9,
+        fontsize=9, frameon=False, title="genotype prefix", title_fontsize=9,
     )
     axis.set_xlabel("UMAP 1")
     axis.set_ylabel("UMAP 2")
-    axis.set_title("HDBSCAN cluster centroids, coloured by plurality genotype\n"
+    axis.set_title("HDBSCAN cluster centroids, coloured by genotype prefix\n"
                    "marker size ∝ cluster size", fontsize=10)
     figure.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
