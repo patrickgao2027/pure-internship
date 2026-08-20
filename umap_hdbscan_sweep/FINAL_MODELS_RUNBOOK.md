@@ -209,8 +209,19 @@ python umap_hdbscan_sweep/export_assignments.py \
 
 Writes `assignments_manifest.csv` / `.json`: per sample the source file, labelled row count,
 clusters present, noise fraction, `file_row_number` range, and a re-check of the source
-fingerprint. Totals should come to **157,501,580** rows at ≈7.36 % noise for the cuML model.
-Exit status is non-zero if any source has drifted.
+fingerprint. Exit status is non-zero if any source has drifted.
+
+**Expect ≈5.08 billion rows in total, not 157.5 M.** These are two different populations and
+confusing them misprices every storage estimate by ~30×:
+
+| | Rows | What it is |
+|---|---|---|
+| `coords.npy` / `cohort_labels.npy` | 157,501,580 | the **cohort embedding** HDBSCAN was fit and labelled on |
+| per-parquet assignments | ~5.08 B (~53 M/sample) | **every filtered row** of all 95 sources, re-encoded |
+
+Per-sample noise will also not equal the cohort's 7.36 %: that figure describes the cohort
+embedding, while each sample is labelled by prediction against the model and lands wherever
+its own reads fall.
 
 The joinable artefact is `row_assignments.parquet` in each sample dir:
 
