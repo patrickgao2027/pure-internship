@@ -356,6 +356,14 @@ def _save_model_artefacts(record: dict, clusterer, cell_dir: Path, args) -> None
     except Exception as exc:  # noqa: BLE001
         missing.append(f"exemplars_ ({type(exc).__name__})")
 
+    try:
+        import joblib
+        pkl_path = cell_dir / "hdbscan_model.pkl"
+        joblib.dump(clusterer, pkl_path)
+        saved["hdbscan_model"] = {"path": str(pkl_path)}
+    except Exception as exc:  # noqa: BLE001
+        missing.append(f"hdbscan_model ({type(exc).__name__})")
+
     record["model_artefacts"] = saved
     if missing:
         record["model_artefacts_missing"] = missing
