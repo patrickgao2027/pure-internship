@@ -336,3 +336,187 @@ Expected: 69  In atlas: 69  PNGs: 69
 Numeric: 51  Categorical: 18
 Missing: none
 Extra:   none
+---
+
+## Mutational Signature Assignment — SigProfiler
+
+| Parameter | Value |
+|---|---|
+| Tool | SigProfilerAssignment |
+| Reference genome | GRCh38 |
+| COSMIC version | 3.5 |
+| Signature database | `uv_only` (lab-specific reference; not full COSMIC) |
+| Input | Per-cluster SBS96 mutation spectrum (96 trinucleotide channels) |
+| SBS96 construction | Vectorised lookup table over (PREV, REF, ALT, NEXT) base codes |
+
+---
+
+## Engineering Methods for Scale
+
+### Proportional Interleaved Multi-Parquet Loading
+
+Training across 95 parquet files simultaneously. Each file's contribution to every batch is proportional to its post-filter row count (largest-remainder allocation), ensuring no sample is over- or under-represented. Row groups within each file are read in shuffled order each epoch to break genomic position clustering (~88 % of adjacent rows share the same locus in the sorted parquet files).
+
+### Content-Hash Train/Val Split
+
+Row assignment to train or val is determined by a deterministic hash of the genomic site (chromosome + position), not position within the file. This keeps all reads at the same locus on the same split side, preventing data leakage across the train/val boundary when reading interleaved from 95 files.
+
+### Epoch Sharding
+
+The 5B-row dataset is split into 20 shards per epoch. Each shard processes a different shuffled subset of row groups, giving the model variation across training without loading the full dataset into memory at once.
+
+### Streaming Inference with Batch-Bounded Memory
+
+Per-sample inference (VAE encode → UMAP → HDBSCAN label) is fully streaming: rows are read from each parquet in 5M-row batches via DuckDB Arrow record-batch reader. Peak memory scales with batch size (~1.2 GB GPU), not sample size (largest sample: 226M rows). Between samples, glibc memory arenas are returned to the OS via `malloc_trim(0)` to prevent RSS accumulation.
+
+### Parametric UMAP for Scalable Projection
+
+Training a parametric UMAP encoder once on 25M rows and applying it via forward pass to new batches reduced the per-sample projection step from hours (standard UMAP refit) to seconds per batch. This was the key step that made full-cohort per-sample inference practical.
+
+### GPU-Accelerated HDBSCAN with RBC Approximate Predict
+
+The cohort HDBSCAN model was reused across all 95 samples via `approximate_predict` with a Random Ball Cover (RBC) index built on the GPU (cuML). RBC precomputes a ball-cover index over the fit points, reducing nearest-neighbour search for new points from O(n·fit_size) to sub-linear. This reduced per-sample labelling from minutes to seconds.
+
+### Vectorised SBS96 Construction
+
+Trinucleotide context (SBS96 channel) assignment was originally computed row-by-row via Python string operations, stalling on 200M-row samples. Replaced with a 625-entry lookup table (LUT) over integer base codes, enabling vectorised numpy indexing over the full batch with no Python-level iteration.
+
+### AMP Mixed Precision Training
+
+Automatic Mixed Precision (AMP) was enabled for the VAE training loop. Forward passes and loss computation run in float16; gradients are accumulated and applied in float32 (GradScaler). This approximately halved GPU memory use per batch, allowing the 1M-row batch size to fit within a 16 GB torch budget on the 48 GB card.
+
+### Row Identity via file_row_number + Source Fingerprint
+
+UMAP coordinates and HDBSCAN labels are joined back to source parquet rows using DuckDB's physical `file_row_number` index, which is stable while the source file is byte-identical. Each output directory records a `source_fingerprint.json` (file size, mtime, SHA-256 of last 1 MB / Parquet footer) to detect silent file drift before any join is trusted.
+
+---
+
+## Hardware
+
+| Resource | Spec |
+|---|---|
+| GPU | NVIDIA RTX PRO 5000 Blackwell |
+| VRAM | 48 GB (47.27 GB usable) |
+| CUDA | 13.0 (sm_120) |
+| PyTorch | 2.10.0 |
+| GPU ML libraries | cuML / cuDF (RAPIDS) for HDBSCAN and UMAP GPU acceleration |
+| CPU decode workers | 8 parallel parquet decoders during training |
+| Node | miletus.sabanciuniv.edu (no SLURM; tmux session management) |
+
+---
+
+## GPU-Specific Training
+
+Training the full 95-sample cohort requires a GPU with at least 16 GB of VRAM dedicated to PyTorch.
+The runner handles environment activation, GPU budgeting, and tmux session management automatically.
+
+### Quick start (miletus)
+
+```bash
+# 1. Verify all 95 files parse and print per-sample interleave weights (cheap, reuse cache)
+STATS_ONLY=1 bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
+
+# 2. Run training with the final configuration used for the cohort model
+EPOCH_CEILING=40 EPOCH_SHARDS=20 PATIENCE=8 BATCH_SIZE=1048576 \
+DECODE_WORKERS=8 KL_WEIGHT=0.005 INPUT_DROPOUT=0.1 HIDDEN_DROPOUT=0.1 \
+bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
+```
+
+### Key environment variables
+
+| Variable | Default | Effect |
+|---|---|---|
+| `PARQUET_GLOB` | auto-detected | Glob for input parquet files; miletus defaults to `/data/lab/ppmseq_parquets/*.featuremap.parquet` |
+| `BATCH_SIZE` | 32768 | Rows per forward pass; final cohort run used **1,048,576** |
+| `DECODE_WORKERS` | 1 | Parallel CPU workers decoding parquet batches; set to **8** for the 2.4× speed gain |
+| `EPOCH_SHARDS` | 20 | Splits one full pass over 5B rows into N mini-epochs; early stopping checks between shards |
+| `EPOCH_CEILING` | 40 | Hard cap on epochs; cohort run stopped at epoch 30 of 38 run |
+| `PATIENCE` | 8 | Epochs without val ELBO improvement (and no active-unit change) before stopping |
+| `KL_WEIGHT` | 0.05 | β in β-VAE loss; final run used **0.005** to avoid posterior collapse |
+| `UV_VAE_GPU_MEM_GB` | auto | Torch VRAM budget in GB; auto-detected, cohort run capped at 16 GB |
+| `UV_VAE_ENABLE_CUML` | 0 | Set to 1 to use cuML/cuDF GPU acceleration for HDBSCAN and UMAP (requires RAPIDS) |
+| `STATS_ONLY` | 0 | Set to 1 to run only the statistics pre-flight and stop before training |
+| `SEED` | 42 | Controls model init, row shuffling, and train/val split |
+
+### GPU decode (not recommended)
+
+Setting `UV_VAE_GPU_DECODE=1` routes parquet decoding through cuDF on the GPU.
+In practice this is **slower** than CPU decode (GPU was idle waiting for CPU in CPU mode, flipping to GPU decode
+made the CPU process wait for the GPU decode instead). The 8-worker CPU decode path (`DECODE_WORKERS=8`) is 2.4× 
+faster than the 1-worker baseline and was used for the final cohort run.
+
+### AMP and VRAM budgeting
+
+AMP (Automatic Mixed Precision) is always on: forward pass and loss run in float16, gradients in float32.
+A GPU preflight check runs before training and rejects configs that exceed the VRAM budget.
+To skip it (e.g. if you have verified the config manually): `SKIP_PREFLIGHT=1`.
+
+```bash
+# Run preflight only without training
+python uv_vae/scripts/gpu_preflight.py \
+    --batch-size 1048576 \
+    --budget-gb 16 \
+    --feature-spec-path uv_vae/ml_features.json
+```
+
+---
+
+## Inference-Only Passes
+
+Use this when you have a trained VAE checkpoint and want to encode new parquet data without retraining.
+All three model files (VAE, UMAP encoder, HDBSCAN model) must be from the same pipeline run to be consistent.
+
+### Full per-sample inference (VAE → UMAP → HDBSCAN → SigProfiler)
+
+```bash
+python umap_hdbscan_sweep/per_parquet_inference.py \
+    --parquet-glob '/data/lab/ppmseq_parquets/*.parquet' \
+    --checkpoint  <path-to>/run_20260802T192814Z/model.pt \
+    --umap-model  <path-to>/13_BEST_25M_nn15_md0.1_umap.pt \
+    --feature-spec uv_vae/ml_features.json \
+    --coords      <path-to>/umap_coords_2d.npy \
+    --context     <path-to>/context.parquet \
+    --output-dir  results/per_parquet_inference
+```
+
+Each sample gets its own subdirectory under `--output-dir` containing cluster labels, SigProfiler assignments, 
+and four plots (UMAP coloured by cluster, substitution, SigProfiler cosine, and per-sample coverage).
+
+### VAE encode only (latent µ vectors)
+
+Use `LatentInference.from_checkpoint` directly when you only need the 16-D latent vectors:
+
+```python
+from uv_vae.inference import LatentInference
+
+inf = LatentInference.from_checkpoint(
+    checkpoint_path="<path-to>/model.pt",
+    feature_spec_path="uv_vae/ml_features.json",
+    device="cuda",          # or "cpu"
+)
+
+# Encode one parquet file (streams in batches, returns concatenated mu)
+mu = inf.encode_parquet(
+    parquet_path="<path-to>/sample.parquet",
+    row_filter="st = 'MIXED' AND et = 'MIXED' AND FILT = 1",
+    batch_size=5_000_000,
+)
+# mu.shape == (n_rows, 16), dtype float32
+```
+
+### Checkpoint path layout
+
+A run directory produced by any of the three trainers always contains:
+
+```
+run_YYYYMMDDTHHMMSSZ/
+├── model.pt                 # VAE weights (load with LatentInference.from_checkpoint)
+├── feature_report.json      # which features were active and their stats
+├── preprocess_report.json   # standardisation means/stds per numeric feature
+├── training_report.json     # loss curves, early-stopping diagnostics
+└── summary.json             # single-line summary of the run
+```
+
+Point `--checkpoint` or `LatentInference.from_checkpoint` at `model.pt`; the loader reads the
+sibling `feature_report.json` and `preprocess_report.json` automatically to reconstruct the exact
+preprocessing that was applied during training.
