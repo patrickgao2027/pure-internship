@@ -93,6 +93,18 @@ def verify_cell(cell_dir: Path, coords: np.ndarray, args) -> dict:
                                if (cell_dir / name).exists())
     result["missing_optional"] = [name for name in OPTIONAL
                                   if not (cell_dir / name).exists()]
+
+    # run_cell writes metrics.json LAST, after the labels and the model artefacts. Its
+    # absence therefore means the cell is still being written, not that it is broken --
+    # which matters because this script is most useful while the sweep is still running.
+    # Reporting a healthy in-flight cell as FAIL would train you to ignore the failures
+    # that are real.
+    if not (cell_dir / "metrics.json").exists():
+        result["checks"]["present"] = (
+            "INCOMPLETE: no metrics.json yet (the sweep writes it last, so this cell is "
+            "most likely still running)")
+        result["status"] = "FAIL" if args.expect_complete else "INCOMPLETE"
+        return result
     if missing:
         result["checks"]["present"] = f"FAIL: missing {', '.join(missing)}"
         result["status"] = "FAIL"
@@ -220,6 +232,10 @@ def main() -> int:
                              "checked are not the ones any fit selected")
     parser.add_argument("--no-predict", action="store_true",
                         help="checks 1-2 only; fast, but does not prove inference works")
+    parser.add_argument("--expect-complete", action="store_true",
+                        help="treat a cell with no metrics.json as FAIL rather than "
+                             "in-progress. Use once the sweep has finished, so a cell that "
+                             "died mid-write is not written off as still running.")
     parser.add_argument("--json-out", type=Path, default=None)
     args = parser.parse_args()
 
@@ -272,10 +288,17 @@ def main() -> int:
     passed = [r for r in results if r["status"] == "PASS"]
     failed = [r for r in results if r["status"] == "FAIL"]
     partial = [r for r in results if r["status"] == "PARTIAL"]
+    incomplete = [r for r in results if r["status"] == "INCOMPLETE"]
 
     log("")
     log(f"{len(passed)} pass, {len(failed)} fail"
-        + (f", {len(partial)} partial (prediction skipped)" if partial else ""))
+        + (f", {len(partial)} partial (prediction skipped)" if partial else "")
+        + (f", {len(incomplete)} still being written" if incomplete else ""))
+    if incomplete:
+        log(f"  in progress: {', '.join(r['cell'] for r in incomplete[:6])}"
+            + (" ..." if len(incomplete) > 6 else ""))
+        log("  re-run with --expect-complete once the sweep finishes, so a cell that died "
+            "mid-write is not mistaken for one still running.")
     for result in failed:
         bad = [f"{name}: {outcome}" for name, outcome in result["checks"].items()
                if outcome != "ok"]
