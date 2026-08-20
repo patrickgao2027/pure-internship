@@ -57,16 +57,41 @@ def _to_host(array) -> np.ndarray:
     return np.asarray(array)
 
 
-def build_clusterer(fit_coords: np.ndarray, mcs: int, ms: int, epsilon: float, backend: str):
-    """Fit with the requested backend, returning (clusterer, backend_that_ran)."""
+def build_clusterer(fit_coords: np.ndarray, mcs: int, ms: int, epsilon: float, backend: str,
+                    min_span_tree: bool = True):
+    """Fit with the requested backend, returning (clusterer, backend_that_ran).
+
+    These kwargs deliberately mirror ``hdbscan_param_sweep._fit_hdbscan`` rather than being
+    a minimal reasonable set, because the probe's whole claim is "a model fit the way the
+    sweep fits them survives the round trip". Two of them are load-bearing and were missing
+    from the first version of this script:
+
+    * ``prediction_data=True`` -- cuML populates ``prediction_data_.core_distances`` only
+      when asked at construction. Without it the fit succeeds, the model looks fine, and
+      ``fast_predict.build_tables`` then dies on a missing core-distance array. That is a
+      property of how the estimator was built, not of what cuML can do.
+    * ``gen_min_span_tree=True`` -- retains the mutual-reachability MST, which is what
+      populates ``relative_validity_``. Requested through a try/except because a backend
+      that rejects the argument should still get fit.
+    """
     common = dict(min_cluster_size=mcs, min_samples=ms,
                   cluster_selection_method="eom",
-                  cluster_selection_epsilon=epsilon)
+                  cluster_selection_epsilon=epsilon,
+                  metric="euclidean", prediction_data=True)
+
     if backend == "cpu":
         import hdbscan
-        return hdbscan.HDBSCAN(**common, prediction_data=True).fit(fit_coords), "cpu"
-    from cuml.cluster import HDBSCAN as CumlHDBSCAN
-    return CumlHDBSCAN(**common).fit(fit_coords), "cuml"
+        build, extra, resolved = hdbscan.HDBSCAN, {}, "cpu"
+    else:
+        from cuml.cluster import HDBSCAN as CumlHDBSCAN
+        build, extra, resolved = CumlHDBSCAN, {}, "cuml"
+
+    if min_span_tree:
+        try:
+            return build(**common, **extra, gen_min_span_tree=True).fit(fit_coords), resolved
+        except TypeError:
+            log("    backend rejected gen_min_span_tree; relative_validity_ unavailable")
+    return build(**common, **extra).fit(fit_coords), resolved
 
 
 def main() -> int:
@@ -76,7 +101,7 @@ def main() -> int:
                         help="cohort coords.npy (default: the miletus cohort coords, or "
                              "$COORDS when that is set to something non-empty)")
     parser.add_argument("--backend", default="cuml", choices=["cuml", "cpu"])
-    parser.add_argument("--fit-rows", type=int, default=200_000,
+    parser.add_argument("--fit-rows", type=int, default=500_000,
                         help="small on purpose -- this probes the round trip, not the fit")
     parser.add_argument("--query-rows", type=int, default=50_000)
     parser.add_argument("--mcs", type=int, default=2500)
@@ -85,6 +110,8 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--predict-backend", default="auto",
                         help="fast_predict knn backend (auto/cuml/sklearn)")
+    parser.add_argument("--no-min-span-tree", action="store_true",
+                        help="skip gen_min_span_tree (drops relative_validity_)")
     parser.add_argument("--keep", default=None,
                         help="write the pickle here instead of a temp dir")
     args = parser.parse_args()
@@ -126,7 +153,8 @@ def main() -> int:
     # ── 1. fit ──────────────────────────────────────────────────────────────────
     started = perf_counter()
     clusterer, backend = build_clusterer(fit_coords, args.mcs, args.ms, args.epsilon,
-                                         args.backend)
+                                         args.backend,
+                                         min_span_tree=not args.no_min_span_tree)
     fit_seconds = perf_counter() - started
     labels_before = _to_host(clusterer.labels_).ravel().astype(np.int32)
     n_clusters = int(labels_before.max()) + 1 if (labels_before >= 0).any() else 0
@@ -135,6 +163,23 @@ def main() -> int:
     if n_clusters == 0:
         log("    no clusters -- raise --fit-rows or lower --mcs; probe is inconclusive")
         return 1
+
+    # Checked here rather than left to surface as an AttributeError from inside
+    # build_tables, because the two causes need different responses and the traceback
+    # cannot tell them apart: a model built WITHOUT prediction_data=True is a mistake in
+    # how it was constructed, while a model built with it and still missing the array is a
+    # real gap in the backend.
+    prediction_data = getattr(clusterer, "prediction_data_", None)
+    has_core = any(getattr(holder, attribute, None) is not None
+                   for holder, attribute in ((prediction_data, "core_distances"),
+                                             (clusterer, "core_distances_"),
+                                             (clusterer, "core_distances")))
+    log(f"    core distances: {'present' if has_core else 'MISSING'}"
+        f"   prediction_data_: {'present' if prediction_data is not None else 'absent'}")
+    if not has_core:
+        log("    fast_predict cannot label without them. This fit requested "
+            "prediction_data=True, so the backend genuinely does not expose them.")
+        return 2
 
     # ── 2. predict with the IN-MEMORY model (the reference answer) ──────────────
     started = perf_counter()
