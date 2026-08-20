@@ -380,9 +380,8 @@ def _score_geometry(record: dict, fit_coords: np.ndarray, fit_labels: np.ndarray
     fit produced. Failures are swallowed for the same reason scoring is -- these are
     diagnostics, not something worth losing hours of fitting over.
     """
-    import cluster_quality
-
     try:
+        import cluster_quality
         started = perf_counter()
         probabilities = getattr(clusterer, "probabilities_", None)
         record["geometry"] = cluster_quality.summarise(
