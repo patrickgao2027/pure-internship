@@ -35,7 +35,8 @@ because cuML exposes no `outlier_scores_` or `exemplars_` and returns a degenera
 cd ~/pure-internship && git pull
 ```
 
-The scripts default to these, override by exporting:
+Every script below already defaults to these paths. **Nothing needs exporting** — the table
+is here so you can override one, not so you have to set them:
 
 | Variable | Default |
 |---|---|
@@ -43,6 +44,10 @@ The scripts default to these, override by exporting:
 | `CONTEXT` | `~/pure-internship/uv_vae/runs/train_multi_20260802T192756Z/stage1_embed/context.parquet` |
 | `PARQUET_GLOB` | `/data/lab/ppmseq_parquets/*.parquet` |
 | `OUTPUT_ROOT` | `~/pure-internship/umap_hdbscan_sweep/hdbscan/results/final_models` |
+
+Do **not** write `--coords "$COORDS"` unless you have exported `COORDS` in that shell: an
+unset variable expands to an empty string rather than to nothing, so the flag arrives as
+`--coords ''` and overrides the default with a filename that cannot exist.
 
 ---
 
@@ -53,7 +58,7 @@ CPU package supports that by design; cuML does not advertise it. Find out in two
 not twenty hours into the 95-sample run.
 
 ```bash
-python umap_hdbscan_sweep/probe_cuml_model.py --coords "$COORDS" --backend cuml
+python umap_hdbscan_sweep/probe_cuml_model.py --backend cuml
 ```
 
 Reads `VERDICT: SAFE` on success. Anything else — `joblib.dump` raising, the model reloading
@@ -64,7 +69,7 @@ instead. Exit codes: `0` safe, `2` the round trip broke, `3` it survived but dis
 Run it for the CPU backend too if you want the baseline:
 
 ```bash
-python umap_hdbscan_sweep/probe_cuml_model.py --coords "$COORDS" --backend cpu
+python umap_hdbscan_sweep/probe_cuml_model.py --backend cpu
 ```
 
 ---

@@ -21,12 +21,14 @@ loads without raising but silently returns different labels is the dangerous out
 one that crashes, so agreement is asserted rather than assumed.
 
 Usage:
+    python umap_hdbscan_sweep/probe_cuml_model.py
+    python umap_hdbscan_sweep/probe_cuml_model.py --backend cpu
     python umap_hdbscan_sweep/probe_cuml_model.py --coords <coords.npy>
-    python umap_hdbscan_sweep/probe_cuml_model.py --coords <coords.npy> --backend cpu
 """
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -35,6 +37,11 @@ from time import perf_counter
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import numpy as np
+
+# Where the cohort coords live on miletus. Same file every clustering run in this project
+# reads, verified identical by md5 to models/coords/umap_coords_2d.npy.
+DEFAULT_COORDS = (Path.home() / "pure-internship" / "umap_hdbscan_sweep" / "hdbscan"
+                  / "results" / "hdbscan_scaling" / "coords.npy")
 
 
 def log(message: str) -> None:
@@ -65,7 +72,9 @@ def build_clusterer(fit_coords: np.ndarray, mcs: int, ms: int, epsilon: float, b
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--coords", required=True, help="cohort coords.npy")
+    parser.add_argument("--coords", default=None,
+                        help="cohort coords.npy (default: the miletus cohort coords, or "
+                             "$COORDS when that is set to something non-empty)")
     parser.add_argument("--backend", default="cuml", choices=["cuml", "cpu"])
     parser.add_argument("--fit-rows", type=int, default=200_000,
                         help="small on purpose -- this probes the round trip, not the fit")
@@ -82,9 +91,23 @@ def main() -> int:
 
     import fast_predict
 
-    coords = np.load(args.coords, mmap_mode="r")
+    # An unset shell variable expands to an empty string, not to nothing, so `--coords
+    # "$COORDS"` with COORDS unset arrives here as '' and reaches np.load as a filename --
+    # which fails deep in numpy rather than at the argument that was actually wrong. Treat
+    # empty as absent and fall back, so the probe runs from a bare invocation.
+    coords_path = (args.coords or "").strip() or os.environ.get("COORDS", "").strip()
+    if not coords_path:
+        coords_path = str(DEFAULT_COORDS)
+        log(f"no --coords given; using the default cohort coords")
+    coords_path = os.path.expanduser(coords_path)
+    if not os.path.exists(coords_path):
+        log(f"ERROR: coords not found: {coords_path}")
+        log("  pass --coords <path/to/coords.npy> explicitly.")
+        return 1
+
+    coords = np.load(coords_path, mmap_mode="r")
     total = coords.shape[0]
-    log(f"coords          : {args.coords}  {coords.shape} {coords.dtype}")
+    log(f"coords          : {coords_path}  {coords.shape} {coords.dtype}")
 
     rng = np.random.default_rng(args.seed)
     fit_idx = np.sort(rng.choice(total, size=min(args.fit_rows, total), replace=False))
