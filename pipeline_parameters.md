@@ -79,19 +79,94 @@ Stopped when **both** conditions held for `patience = 8` consecutive epochs:
 
 ---
 
-## 3. HDBSCAN — Low-Noise Cohort Clustering
+## 3. HDBSCAN — Cohort Clustering
 
-### Parameters
+### Selected Configuration (sweep cell `fit1000000_mcs2500_ms15_eom`)
 
 | Parameter | Value |
 |---|---|
 | min_cluster_size (mcs) | 2,500 |
-| min_samples (ms) | 1 |
-| cluster_selection_epsilon | 0.05 |
-| Fit rows | 1,000,000 (random subsample of 2D UMAP coordinates) |
-| Input | 2D UMAP coordinates |
-| Clusters found | 170 |
-| Noise fraction (cohort) | 6.88 % |
-| Fit time | 86.4 s |
-| Label time (full cohort, approximate_predict) | 46.0 s |
-| GPU VRAM (cuML RMM pool) | 36 GB pre-allocated; 9.944 GB total device usage at fit time; HDBSCAN delta ≈ 0 for 1M-row fit |
+| min_samples (ms) | 15 |
+| cluster_selection_method | eom (excess of mass) |
+| cluster_selection_epsilon | 0.0 |
+| Fit rows | 1,000,000 (random subsample of 2D UMAP coordinates, seed 42) |
+| Input | 2D UMAP coordinates (157,501,580 × 2, from the rank-13 parametric encoder) |
+| **Clustering backend** | **cuML (RAPIDS GPU)** — the production model |
+| Clusters found | 175 |
+| Noise fraction (cohort) | 7.36 % |
+| Noise fraction (fit set) | 7.24 % |
+| Fit time | 18.8 s |
+| Label time (full cohort, 157.5 M rows, RBC fast-predict) | 122.4 s |
+
+### Cluster Quality (cuML)
+
+| Metric | Value |
+|---|---|
+| DBCV (stratified, 400 pts/cluster, `kdbcv` backend) | 0.4313 |
+| Relative validity (`relative_validity_`) | 0.3174 |
+| Points in negative-DBCV clusters | 10.77 % |
+| Clusters with negative DBCV | 9.14 % (16 / 175) |
+| Connectivity (k = 10, mean / fraction pure) | 0.99996 / 0.99986 |
+| Mean membership probability | 0.8284 |
+| Fraction of points with probability > 0.8 | 0.7216 |
+| Mean probability, held-out rows | 0.8339 |
+| Cluster persistence (median) | 1.0000 — *degenerate, see note* |
+
+### Signature Fit — SigProfilerAssignment (`uv_only`, GRCh38, v3.5)
+
+| Metric | Value |
+|---|---|
+| Total mutations in SBS96 matrix | 145,916,931 |
+| Cosine similarity, mean / median | 0.2804 / 0.2390 |
+| Cosine similarity, mutation-weighted mean | 0.2774 |
+| Clusters with cosine > 0.7 | 11 (6.29 %), carrying 5.65 % of mutations |
+| Clusters with cosine > 0.8 | 3 (1.71 %), carrying 1.39 % of mutations |
+| L1 residual, mean % | 169.73 |
+| Top-channel share, median | 0.6526 |
+| Fraction of clusters with top-channel share > 0.5 | 0.6629 |
+| Distinct dominant channels | 38 across 175 clusters |
+
+### CPU Cross-Check (reference implementation, *not* the deployed model)
+
+The same cell refit with CPU `hdbscan` 0.8.44 to obtain the diagnostics cuML does not expose:
+
+| Metric | cuML (deployed) | CPU `hdbscan` |
+|---|---|---|
+| Clusters | 175 | 181 |
+| Noise (cohort) | 7.36 % | 8.00 % |
+| DBCV | 0.4313 (`kdbcv`) | 0.3674 (`hdbscan`) |
+| Relative validity | 0.3174 | 0.2160 |
+| Points in negative-DBCV clusters | 10.77 % | 13.12 % |
+| Mean membership probability | 0.8284 | 0.8105 |
+| Cluster persistence (median / min / max) | 1.0 / 1.0 / 1.0 (degenerate) | 0.1086 / 0.0009 / 0.6069 |
+| Fit / label time | 18.8 s / 122.4 s | 10.7 s / 120.1 s |
+
+**Backend note (important).** cuML and CPU HDBSCAN are two implementations of the same
+algorithm and do not produce identical partitions: across the full 24-cell sweep grid they
+differ on **every** cell, with cuML's cluster count ranging from 7.3 % below to 22.6 % above
+the CPU count. The cuML fit is the deployed model because it is the one the sweep selected
+this cell on and the one all reported clustering and signature metrics were computed from.
+cuML does not populate `outlier_scores_` or `exemplars_` and returns a degenerate
+`cluster_persistence_` of exactly 1.0 for every cluster, so persistence, GLOSH outlier scores
+and exemplars can only be quoted from the CPU refit — and must be labelled as coming from a
+181-cluster partition, not the deployed 175-cluster one. DBCV is likewise not comparable
+across the two rows above: the cuML pass scored with the `kdbcv` backend and the CPU pass with
+the `hdbscan` backend, on independent 400-points-per-cluster stratified samples.
+
+An earlier version of this sheet reported 170 clusters at ms = 1, eps = 0.05, 6.88 % noise.
+Those values came from the `low_noise_hdbscan` run — a **different parameter cell** — and were
+incorrect for this section regardless of backend. See
+`umap_hdbscan_sweep/hdbscan/hdbscan_sweep_comparison.xlsx` for the full 24-cell backend
+comparison.
+
+### Saved Artefacts
+
+| Artefact | cuML | CPU |
+|---|---|---|
+| `cohort_labels.npy`, `cohort_probabilities.npy` | ✓ | ✓ |
+| `cluster_persistence.npy` | ✓ (degenerate) | ✓ |
+| `outlier_scores.npy` | — | ✓ |
+| `exemplars.npz` | — | ✓ |
+| `hdbscan_model.pkl` | ✓ | ✓ |
+| `fit_indices.npy` | ✓ | ✓ |
+| SigProfiler `uv_only` assignment | ✓ | — |

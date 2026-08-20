@@ -230,14 +230,24 @@ def run_cell(cell: Cell, coords: np.ndarray, cell_dir: Path, args,
         f"(mcs={cell.min_cluster_size}, ms={cell.min_samples}, "
         f"{cell.cluster_selection_method}, eps={cell.cluster_selection_epsilon})")
     started = perf_counter()
-    clusterer = _fit_hdbscan(fit_coords, cell, args)
+    clusterer, fit_backend = _fit_hdbscan(fit_coords, cell, args)
     record["fit_seconds"] = round(perf_counter() - started, 1)
+    # The backend that RAN, plus what was asked for. 'auto' resolves to cuML whenever cuML
+    # imports, so the requested value alone does not identify the implementation -- and the
+    # two produce materially different clusterings (measured: all 24 cells of this grid
+    # differ, cuML from 7.3% below to 22.6% above the CPU cluster count). Recording only the
+    # request is what let a cuML sweep sit in a directory named ..._cpu and be published as a
+    # CPU/GPU agreement result.
+    record["cluster_backend"] = fit_backend
+    record["cluster_backend_requested"] = args.cluster_backend
+    record["dbcv_backend_requested"] = args.dbcv_backend
     fit_labels = np.asarray(_to_host(clusterer.labels_)).astype(np.int32)
     n_clusters = int(fit_labels.max()) + 1 if (fit_labels >= 0).any() else 0
     record["n_clusters_fit"] = n_clusters
     record["fit_noise_fraction"] = float((fit_labels < 0).mean())
     log(f"    {record['fit_seconds']}s, {n_clusters:,} clusters, "
-        f"{record['fit_noise_fraction'] * 100:.2f}% noise on the fit set")
+        f"{record['fit_noise_fraction'] * 100:.2f}% noise on the fit set "
+        f"[backend={fit_backend}]")
     if n_clusters == 0:
         record["error"] = "no non-noise clusters"
         (cell_dir / "metrics.json").write_text(json.dumps(record, indent=2))
@@ -294,7 +304,7 @@ def run_cell(cell: Cell, coords: np.ndarray, cell_dir: Path, args,
         _score_geometry(record, fit_coords, fit_labels, clusterer, args)
 
     if not args.skip_model_artefacts:
-        _save_model_artefacts(record, clusterer, cell_dir, args)
+        _save_model_artefacts(record, clusterer, cell_dir, args, fit_indices)
 
     if sbs96_index is not None:
         _score_cell(record, cell_dir, sbs96_index, labels, row_order,
@@ -305,7 +315,8 @@ def run_cell(cell: Cell, coords: np.ndarray, cell_dir: Path, args,
     return record
 
 
-def _save_model_artefacts(record: dict, clusterer, cell_dir: Path, args) -> None:
+def _save_model_artefacts(record: dict, clusterer, cell_dir: Path, args,
+                          fit_indices: np.ndarray | None = None) -> None:
     """Persist the small clusterer arrays that a re-fit would otherwise be needed to recover.
 
     The fit is the entire cost of this sweep (3.2 h at 25M), and the clusterer object is
@@ -363,6 +374,19 @@ def _save_model_artefacts(record: dict, clusterer, cell_dir: Path, args) -> None
         saved["hdbscan_model"] = {"path": str(pkl_path)}
     except Exception as exc:  # noqa: BLE001
         missing.append(f"hdbscan_model ({type(exc).__name__})")
+
+    # The rows the model was fit on, in fit order. Downstream prediction (fast_predict's
+    # tables index into the fit set positionally) needs the EXACT set, and re-deriving it
+    # from (seed, fit_rows) only agrees while both scripts keep the same derivation and the
+    # same coords length -- a silent divergence would relabel every read against the wrong
+    # neighbours. Cheap to store (8 MB at 1M rows) next to the model it belongs to.
+    if fit_indices is not None:
+        try:
+            path = cell_dir / "fit_indices.npy"
+            np.save(path, np.asarray(fit_indices, dtype=np.int64))
+            saved["fit_indices"] = {"path": str(path), "shape": [int(len(fit_indices))]}
+        except Exception as exc:  # noqa: BLE001
+            missing.append(f"fit_indices ({type(exc).__name__})")
 
     record["model_artefacts"] = saved
     if missing:
@@ -493,6 +517,12 @@ def _fit_hdbscan(fit_coords: np.ndarray, cell: Cell, args):
     CPU ``hdbscan`` package instead, which costs real wall time: CPU HDBSCAN has not been
     benchmarked against this project's 2-D embedding at scale, so time it on your smallest
     cell before requesting it on anything past a few million fit rows.
+
+    Returns ``(clusterer, backend)`` where ``backend`` is the backend that actually ran, not
+    the one requested. Those differ whenever ``--cluster-backend auto`` is left at its default
+    and cuML happens to be importable, which is exactly how a sweep written to a directory
+    named ``param_sweep_refit_cpu`` came to hold cuML fits. The caller records the resolved
+    value so the artefacts can never again misrepresent which implementation produced them.
     """
     common = dict(min_cluster_size=cell.min_cluster_size, min_samples=cell.min_samples,
                   cluster_selection_method=cell.cluster_selection_method,
@@ -508,17 +538,17 @@ def _fit_hdbscan(fit_coords: np.ndarray, cell: Cell, args):
 
     if use_cpu:
         import hdbscan
-        build, extra = hdbscan.HDBSCAN, {"core_dist_n_jobs": args.threads}
+        build, extra, backend = hdbscan.HDBSCAN, {"core_dist_n_jobs": args.threads}, "cpu"
     else:
         from cuml.cluster import HDBSCAN as CumlHDBSCAN
-        build, extra = CumlHDBSCAN, {}
+        build, extra, backend = CumlHDBSCAN, {}, "cuml"
 
     if not args.no_min_span_tree:
         try:
-            return build(**common, **extra, gen_min_span_tree=True).fit(fit_coords)
+            return build(**common, **extra, gen_min_span_tree=True).fit(fit_coords), backend
         except TypeError:
             log("    backend rejected gen_min_span_tree; relative_validity_ unavailable")
-    return build(**common, **extra).fit(fit_coords)
+    return build(**common, **extra).fit(fit_coords), backend
 
 
 def _to_host(array):
@@ -558,6 +588,13 @@ def aggregate(output_dir: Path) -> pl.DataFrame:
             "eps": cell["cluster_selection_epsilon"],
             "n_clusters": payload.get("cohort_n_clusters", 0),
             "noise_pct": round(payload.get("cohort_noise_fraction", 0) * 100, 2),
+            # Which implementation actually produced this row. Sits next to n_clusters
+            # because the two backends disagree on it for every cell of this grid, so the
+            # count is meaningless without knowing which one ran. "?" marks a cell written
+            # before this column existed -- infer those from persistence: cuML reports
+            # exactly 1.0 for every cluster, a CPU fit reports a real distribution.
+            "backend": payload.get("cluster_backend", "?"),
+            "dbcv_backend": geometry.get("dbcv_backend", "?"),
             "top_chan": round(spectrum.get("top_channel_share_median", nan), 3),
             "tc>0.5": round(spectrum.get("frac_above_05", nan), 3),
             "tc>0.8": round(spectrum.get("frac_above_08", nan), 3),
@@ -743,6 +780,13 @@ def main() -> int:
 
     (output_dir / "sweep_config.json").write_text(json.dumps({
         "grid": [asdict(c) for c in grid], "seed": args.seed, "backend": args.backend,
+        # "backend" above is the LABELLING backend (rbc/brute/sklearn). These two are the
+        # clustering and DBCV backends, recorded separately because they decide what the
+        # numbers mean. Both are the requested values; the resolved cluster backend is in
+        # each cell's metrics.json under "cluster_backend", since 'auto' is only resolved
+        # per fit.
+        "cluster_backend_requested": args.cluster_backend,
+        "dbcv_backend_requested": args.dbcv_backend,
         "started": datetime.now(timezone.utc).isoformat(),
     }, indent=2))
 
