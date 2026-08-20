@@ -125,6 +125,54 @@ much longer — 24 cells × 2 backends, with fits up to 5 M rows.
 
 ---
 
+## Step 2b — verify the saved models are usable for inference
+
+A cell directory that looks complete is not the same as one that works. The sweep holds the
+clusterer in memory while it labels, so every number in `metrics.json` can be right while the
+pickle beside it is unusable — and none of that surfaces until an inference run loads the
+directory later.
+
+```bash
+python umap_hdbscan_sweep/verify_saved_models.py \
+    --models-root ~/pure-internship/umap_hdbscan_sweep/hdbscan/results/final_models \
+    --json-out /tmp/verify_models.json
+```
+
+Three checks per cell, from disk only, nothing carried over from the fit:
+
+| Check | What it proves |
+|---|---|
+| **present** | the files a consumer needs exist and the pickle loads |
+| **consistent** | `clusterer.labels_` matches `cohort_labels.npy` at `fit_indices` — catches an index file paired with the wrong model |
+| **reproduces** | held rows re-labelled from the reloaded model get the *same* labels the sweep recorded |
+
+Only the third exercises the reloaded model end to end; it is the one that catches a pickle
+that loads but does not work. Exit status is 0 only when every cell passes everything, so it
+can gate step 3.
+
+The probe rows are drawn with seed 7, deliberately not the sweep's 42, so the rows checked
+are not the ones any fit selected. `--no-predict` runs checks 1–2 only — fast, but proves
+nothing about labelling.
+
+---
+
+## Interlude — which `cohort_labels.npy` is which
+
+Two arrays of identical shape `(157501580,)` and identical size are **not** the same
+clustering. Measured:
+
+| File | Clusters | Noise | Cell |
+|---|---|---|---|
+| `models/cohort_labels.npy` | 175 | 7.3553 % | selected cuML cell — **correct** |
+| `models/coords/cohort_labels.npy` | 170 | 6.8835 % | `low_noise_mcs2500_ms1_eps0.05` — wrong cell |
+
+ARI between them is **0.645** — a genuinely different partition, not a relabelling. Identical
+file size proves only that both cover the same rows. Always check
+`(labels.max()+1, (labels<0).mean())` before trusting a label array, because nothing about
+the filename or size distinguishes them.
+
+---
+
 ## Step 3 — 95-sample pipeline against the selected model
 
 Per sample: DuckDB filter → VAE encode → parametric UMAP → HDBSCAN label → SBS96 →
@@ -219,6 +267,18 @@ SRC=~/pure-internship/umap_hdbscan_sweep/hdbscan/results/final_models/cuml/cells
 cp "$SRC"/{hdbscan_model.pkl,fit_indices.npy,cluster_persistence.npy,metrics.json} "$DEST"/
 cp "$SRC"/cohort_labels.npy ~/pure-internship/UV_VAE_Deployment/models/coords/
 ```
+
+Then confirm what landed, rather than trusting the copy:
+
+```bash
+python -c "
+import numpy as np
+x=np.load('$HOME/pure-internship/UV_VAE_Deployment/models/coords/cohort_labels.npy',mmap_mode='r')
+print(int(x.max())+1,'clusters', round(float((np.asarray(x)<0).mean())*100,4),'% noise')
+"
+```
+
+Must read `175 clusters 7.3553 % noise`. Anything else means the wrong array is deployed.
 
 `umap_coords_2d.npy` does **not** change — it is the same rank-13 parametric encoder output
 throughout, verified identical by md5 to the `coords.npy` every clustering run above reads.
