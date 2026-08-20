@@ -92,18 +92,35 @@ class PredictionTables:
     n_fit: int
 
 
-def build_tables(clusterer, n_fit: int, min_samples: int | None = None) -> PredictionTables:
+def resolve_min_samples(clusterer, min_samples: int | None = None) -> int:
+    """The min_samples the tables will use, without building them.
+
+    Exposed because core distances can be recomputed instead of read off the model, and the
+    recompute needs this value -- but it would otherwise only be available *after*
+    build_tables, which is exactly the call that fails when they are missing.
+    """
+    return int(min_samples or getattr(clusterer, "min_samples", None)
+               or clusterer.min_cluster_size)
+
+
+def build_tables(clusterer, n_fit: int, min_samples: int | None = None,
+                 core_distances: np.ndarray | None = None) -> PredictionTables:
     """Densify a fitted HDBSCAN (cuML or CPU) into PredictionTables.
 
     Raises with a specific message when an attribute is missing rather than failing deep in
     the descent, because "which internals does this cuML build expose" is the one thing that
     cannot be settled off the GPU box.
+
+    ``core_distances`` overrides what the model carries. Supply it for a model that never
+    stored them -- see ``recompute_core_distances``.
     """
     raw_tree = _raw_condensed_tree(clusterer)
-    min_samples = int(min_samples or getattr(clusterer, "min_samples", None)
-                      or clusterer.min_cluster_size)
+    min_samples = resolve_min_samples(clusterer, min_samples)
 
-    core_distances = _core_distances(clusterer, n_fit)
+    if core_distances is None:
+        core_distances = _core_distances(clusterer, n_fit)
+    else:
+        core_distances = np.asarray(core_distances, dtype=np.float64).ravel()
     if core_distances.shape[0] != n_fit:
         raise ValueError(
             f"core_distances has {core_distances.shape[0]} entries but the fit set has "
@@ -221,8 +238,15 @@ def _core_distances(clusterer, n_fit: int) -> np.ndarray:
             return _to_host(value).ravel()
     raise AttributeError(
         "fitted model exposes no core distances (looked at prediction_data_.core_distances, "
-        "core_distances_, core_distances). They can be recomputed as the min_samples-th "
-        "nearest-neighbour distance within the fit set -- pass --recompute-core-distances."
+        "core_distances_, core_distances).\n"
+        "  Most likely cause: the model was constructed without prediction_data=True. Both "
+        "cuML and the CPU hdbscan package populate core distances only when asked for them "
+        "at construction, so refitting with prediction_data=True is the real fix and is what "
+        "hdbscan_param_sweep._fit_hdbscan already does.\n"
+        "  If refitting is not an option, they can be recomputed as the min_samples-th "
+        "nearest-neighbour distance inside the fit set: pass --recompute-core-distances to "
+        "this script's CLI, or call fast_predict.recompute_core_distances(fit_coords, "
+        "min_samples) and hand the result to build_tables(core_distances=...)."
     )
 
 
@@ -304,6 +328,26 @@ def knn_query(fit_coords: np.ndarray, query_coords: np.ndarray, k: int,
         distance_chunks.append(_to_host(distances).astype(np.float64))
         index_chunks.append(_to_host(indices).astype(np.int64))
     return np.concatenate(distance_chunks), np.concatenate(index_chunks)
+
+
+def recompute_core_distances(fit_coords: np.ndarray, min_samples: int,
+                             backend: str = "rbc", batch_rows: int = 5_000_000,
+                             index=None) -> np.ndarray:
+    """Core distances derived from the fit set, for a model that never stored them.
+
+    ``k = min_samples`` neighbours, taking the last column. The self-match sits at position 0
+    at distance 0, so this is the ``(min_samples - 1)``-th *true* neighbour -- which looks
+    like an off-by-one and is not: hdbscan counts the point itself among its min_samples.
+    Verified against ``prediction_data_.core_distances`` on a 1,200-point three-blob fit at
+    min_samples=5, where ``k = min_samples`` reproduces the model's own array exactly
+    (max |diff| = 0.0) and ``k = min_samples + 1`` is wrong by up to 0.44.
+
+    This is a genuine substitute, not an approximation: it is the same quantity the fit
+    computes. It is only separate because the fit does not always keep it.
+    """
+    distances, _ = knn_query(fit_coords, fit_coords, min_samples,
+                             backend=backend, batch_rows=batch_rows, index=index)
+    return distances[:, -1].astype(np.float64)
 
 
 def build_index(fit_coords: np.ndarray, k: int, backend: str):
@@ -451,8 +495,10 @@ def do_inspect(model) -> None:
     print(f"\nWhat this script needs: condensed_tree_ (raw) [{'ok' if have_tree else 'MISSING'}], "
           f"core distances [{'ok' if have_core else 'MISSING'}], labels_.")
     if not have_core:
-        print("Core distances missing everywhere -- pass --recompute-core-distances "
-              "(they are just the min_samples-th NN distance inside the fit set).")
+        print("Core distances missing everywhere. The model was most likely fit without "
+              "prediction_data=True -- refitting with it is the real fix. Failing that, "
+              "pass --recompute-core-distances to derive them from the fit set (they are "
+              "just the min_samples-th NN distance inside it).")
 
 
 def do_diagnose(tables: PredictionTables, fit_coords, query_coords, args) -> None:
@@ -638,18 +684,26 @@ def main() -> None:
     # First touch of prediction_data_ on a joblib-loaded cuML model regenerates it on the GPU
     # (its C++/GPU state does not always pickle), which on 25M rows is minutes of real work
     # with no output. Say so, otherwise it reads as a hang.
+    # Recomputed BEFORE build_tables, not after. build_tables raises when the model carries
+    # no core distances, so a flag applied to the tables it returns can only ever patch a
+    # model that did not need patching -- for the model the flag exists to rescue, the call
+    # that consumes it never returns. This ordering is what makes the suggestion in that
+    # error message actually reachable.
+    override = None
+    if args.recompute_core_distances:
+        min_samples = resolve_min_samples(model, args.min_samples)
+        log(f"recomputing core distances inside the fit set (min_samples={min_samples}) ...")
+        override = recompute_core_distances(fit_coords, min_samples,
+                                            backend=args.backend,
+                                            batch_rows=args.batch_rows)
+
     log("building prediction tables (a cuML model regenerates prediction data on first "
         "access after a joblib load -- minutes at 25M rows; nvidia-smi will show it working)")
-    tables = build_tables(model, n_fit=fit_coords.shape[0], min_samples=args.min_samples)
+    tables = build_tables(model, n_fit=fit_coords.shape[0], min_samples=args.min_samples,
+                          core_distances=override)
     log(f"tables built: min_samples={tables.min_samples}, "
         f"{int((tables.cluster_label >= 0).sum()):,} mapped clusters, "
         f"tree_root={tables.tree_root}")
-
-    if args.recompute_core_distances:
-        log("recomputing core distances inside the fit set ...")
-        distances, _ = knn_query(fit_coords, fit_coords, tables.min_samples,
-                                 backend=args.backend, batch_rows=args.batch_rows)
-        tables.core_distances = distances[:, -1].astype(np.float64)
 
     if args.probe_indices:
         query_idx = np.load(args.probe_indices)
