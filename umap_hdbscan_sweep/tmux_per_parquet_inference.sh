@@ -43,7 +43,7 @@ CONTEXT="${CONTEXT:-$HOME/pure-internship/uv_vae/runs/train_multi_20260802T19275
 # two produce different partitions and cluster ids are not comparable across them.
 CLUSTER_BACKEND="${CLUSTER_BACKEND:-cuml}"
 CELL="${CELL:-fit1000000_mcs2500_ms15_eom}"
-MODEL_DIR="${MODEL_DIR:-$HOME/pure-internship/umap_hdbscan_sweep/hdbscan/results/final_models/$CLUSTER_BACKEND/cells/$CELL}"
+MODEL_DIR="${MODEL_DIR:-$HOME/pure-internship/umap_hdbscan_sweep/hdbscan/results/sweep_both_backends/$CLUSTER_BACKEND/cells/$CELL}"
 
 OUTPUT_DIR="${OUTPUT_DIR:-$HOME/pure-internship/umap_hdbscan_sweep/per_parquet_inference_$CLUSTER_BACKEND}"
 
