@@ -34,6 +34,12 @@ That query returns every column of `csb0-1-ppm0058.featuremap.parquet` plus four
 | `umap_1`, `umap_2` | float32 | parametric UMAP coordinates |
 | `cluster_label` | int32 | HDBSCAN cluster id; `-1` is noise, `NULL` means the row did not pass the inference filter |
 
+`NULL` and `-1` are different populations and must not be conflated: `NULL` is a row that
+never entered inference, `-1` is one that did and was classified as noise. Measured on
+`csb0_1_ppm0058`: 255,292,378 source rows, of which 53,857,133 passed the filter and carry a
+label, and 4,948,253 of those (9.1877 %) are noise. The labelled count equals the filter
+count exactly, which is what makes `NULL` a reliable proxy for "filtered out".
+
 `.df()` materialises the result into pandas, so put a `LIMIT` on exploratory queries or
 constrain them with a `WHERE` — a per-sample view is ~54 M rows and `all_samples` is 5.08 B.
 Use `.fetchall()` for small results, or `.arrow()` / `.fetch_record_batch()` to stream a
@@ -156,10 +162,13 @@ DuckDB pushes predicates down into both parquets and skips row groups that canno
 a selective query reads a fraction of the data.
 
 - **Per-sample views are the fast path.** `WHERE cluster_label = 106` against one view
-  touches one source file (~54 M rows) and one assignment file.
-- **`all_samples` spans 5.08 billion rows.** Filtered queries prune well; an unfiltered
-  aggregate genuinely reads everything and will take a long time. Constrain by `sample`,
-  `cluster_label`, or `CHROM` wherever you can.
+  touches one source file and one assignment file.
+- **`all_samples` spans ~24 billion source rows**, of which 5.08 B carry a label. Filtered
+  queries prune well; an unfiltered aggregate genuinely reads everything and will take a
+  long time. Constrain by `sample`, `cluster_label`, or `CHROM` wherever you can.
+- **`WHERE cluster_label IS NOT NULL` is a large win**, not just a correctness filter: it
+  discards ~79 % of rows, and DuckDB pushes it into the join rather than materialising the
+  unlabelled side first.
 - **Set memory, threads and spill directory** before cohort-wide work:
 
   ```python
