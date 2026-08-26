@@ -41,9 +41,9 @@ label, and 4,948,253 of those (9.1877 %) are noise. The labelled count equals th
 count exactly, which is what makes `NULL` a reliable proxy for "filtered out".
 
 `.df()` materialises the result into pandas, so put a `LIMIT` on exploratory queries or
-constrain them with a `WHERE` — a per-sample view is ~54 M rows and `all_samples` is 5.08 B.
-Use `.fetchall()` for small results, or `.arrow()` / `.fetch_record_batch()` to stream a
-large one without building a frame.
+constrain them with a `WHERE` — a per-sample view is ~255 M rows (~54 M of them labelled)
+and `all_samples` is ~24 B. Use `.fetchall()` for small results, or `.arrow()` /
+`.fetch_record_batch()` to stream a large one without building a frame.
 
 ---
 
