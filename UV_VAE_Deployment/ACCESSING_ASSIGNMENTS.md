@@ -12,15 +12,27 @@ Nothing was written into the source files. The reason, and what that costs you, 
 
 ## 1. The one command
 
+miletus has the duckdb **Python package** but not the `duckdb` command, so
+`query_enriched.py` is the way in. With no arguments it describes the database:
+
 ```bash
-duckdb ~/pure-internship/umap_hdbscan_sweep/enriched.duckdb
+python umap_hdbscan_sweep/query_enriched.py
 ```
 
-```sql
-SELECT * FROM csb0_1_ppm0058 LIMIT 5;
+With SQL, it runs it:
+
+```bash
+python umap_hdbscan_sweep/query_enriched.py "SELECT * FROM csb0_1_ppm0058 LIMIT 5"
 ```
 
-That returns every column of `csb0-1-ppm0058.featuremap.parquet` plus four more:
+Output is printed as a table, truncated at `--limit` (default 50) so a query that forgot its
+own `LIMIT` cannot dump five billion rows into your terminal. `--csv FILE` or
+`--parquet FILE` writes the complete result instead, untruncated. The connection is
+read-only.
+
+If you do have the CLI somewhere, `duckdb enriched.duckdb` works identically.
+
+That query returns every column of `csb0-1-ppm0058.featuremap.parquet` plus four more:
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -138,9 +150,11 @@ a selective query reads a fraction of the data.
   `cluster_label`, or `CHROM` wherever you can.
 - **Give it memory and threads** for cohort-wide work:
 
-  ```sql
-  SET memory_limit='32GB'; SET threads=8;
-  SET temp_directory='/data/lab/ppmseq_parquets/duckdb_tmp';
+  ```bash
+  python umap_hdbscan_sweep/query_enriched.py \
+      --memory-limit 32GB --threads 8 \
+      --temp-dir /data/lab/ppmseq_parquets/duckdb_tmp \
+      "SELECT sample, count(*) FROM all_samples GROUP BY 1"
   ```
 
   The temp directory matters: DuckDB spills to disk when a query exceeds the memory limit,
