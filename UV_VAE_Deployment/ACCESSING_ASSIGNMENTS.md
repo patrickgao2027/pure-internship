@@ -10,27 +10,21 @@ Nothing was written into the source files. The reason, and what that costs you, 
 
 ---
 
-## 1. The one command
+## 1. Connecting
 
-miletus has the duckdb **Python package** but not the `duckdb` command, so
-`query_enriched.py` is the way in. With no arguments it describes the database:
+```python
+import duckdb
 
-```bash
-python umap_hdbscan_sweep/query_enriched.py
+con = duckdb.connect(
+    "/home/patrick/pure-internship/umap_hdbscan_sweep/enriched.duckdb",
+    read_only=True)
+
+df = con.execute("SELECT * FROM csb0_1_ppm0058 LIMIT 5").df()
 ```
 
-With SQL, it runs it:
-
-```bash
-python umap_hdbscan_sweep/query_enriched.py "SELECT * FROM csb0_1_ppm0058 LIMIT 5"
-```
-
-Output is printed as a table, truncated at `--limit` (default 50) so a query that forgot its
-own `LIMIT` cannot dump five billion rows into your terminal. `--csv FILE` or
-`--parquet FILE` writes the complete result instead, untruncated. The connection is
-read-only.
-
-If you do have the CLI somewhere, `duckdb enriched.duckdb` works identically.
+`read_only=True` is worth keeping. These views point at the lab's shared source parquets in
+`/data/lab/ppmseq_parquets/`, and a stray DDL typo against a shared dataset is not a
+recoverable mistake.
 
 That query returns every column of `csb0-1-ppm0058.featuremap.parquet` plus four more:
 
@@ -40,14 +34,10 @@ That query returns every column of `csb0-1-ppm0058.featuremap.parquet` plus four
 | `umap_1`, `umap_2` | float32 | parametric UMAP coordinates |
 | `cluster_label` | int32 | HDBSCAN cluster id; `-1` is noise, `NULL` means the row did not pass the inference filter |
 
-From Python, without the CLI:
-
-```python
-import duckdb
-con = duckdb.connect("/home/patrick/pure-internship/umap_hdbscan_sweep/enriched.duckdb",
-                     read_only=True)
-df = con.execute("SELECT * FROM csb0_1_ppm0058 WHERE cluster_label = 42").df()
-```
+`.df()` materialises the result into pandas, so put a `LIMIT` on exploratory queries or
+constrain them with a `WHERE` — a per-sample view is ~54 M rows and `all_samples` is 5.08 B.
+Use `.fetchall()` for small results, or `.arrow()` / `.fetch_record_batch()` to stream a
+large one without building a frame.
 
 ---
 
@@ -55,8 +45,9 @@ df = con.execute("SELECT * FROM csb0_1_ppm0058 WHERE cluster_label = 42").df()
 
 `sample_index` is the table of contents — start there rather than guessing view names:
 
-```sql
-SELECT view_name, sample, labelled_rows, noise_pct, source FROM sample_index;
+```python
+con.execute("SELECT view_name, sample, labelled_rows, noise_pct, source "
+            "FROM sample_index ORDER BY view_name").df()
 ```
 
 | Object | What it is |
@@ -67,7 +58,13 @@ SELECT view_name, sample, labelled_rows, noise_pct, source FROM sample_index;
 
 View names are the sample name with `.featuremap` dropped and `-` replaced by `_`, because
 `csb0-1-ppm0058.featuremap` is not a legal SQL identifier — the dashes parse as subtraction
-and the dot as a schema qualifier. `sample_index.sample` keeps the original spelling.
+and the dot as a schema qualifier. `sample_index.sample` keeps the original spelling, so to
+go from one to the other:
+
+```python
+name = con.execute("SELECT view_name FROM sample_index WHERE sample = ?",
+                   ["csb0-1-ppm0058.featuremap"]).fetchone()[0]
+```
 
 ---
 
@@ -75,9 +72,10 @@ and the dot as a schema qualifier. `sample_index.sample` keeps the original spel
 
 **A row, whole.** Source columns and derived columns are peers:
 
-```sql
-SELECT CHROM, POS, REF, ALT, st, FILT, umap_1, umap_2, cluster_label
-FROM csb0_1_ppm0058 ORDER BY file_row_number LIMIT 4;
+```python
+con.execute("""
+    SELECT CHROM, POS, REF, ALT, st, FILT, umap_1, umap_2, cluster_label
+    FROM csb0_1_ppm0058 ORDER BY file_row_number LIMIT 4""").df()
 ```
 
 ```
@@ -94,46 +92,60 @@ and stay in place. The view is row-for-row identical to its source; nothing is d
 
 **Aggregate over a source column, grouped by a derived one:**
 
-```sql
-SELECT cluster_label,
-       count(*)            AS reads,
-       round(avg(rq), 4)   AS mean_rq,
-       round(avg(RL), 1)   AS mean_read_length
-FROM csb0_1_ppm0058 WHERE cluster_label IS NOT NULL
-GROUP BY 1 ORDER BY reads DESC LIMIT 10;
+```python
+con.execute("""
+    SELECT cluster_label,
+           count(*)          AS reads,
+           round(avg(rq), 4) AS mean_rq,
+           round(avg(RL), 1) AS mean_read_length
+    FROM csb0_1_ppm0058 WHERE cluster_label IS NOT NULL
+    GROUP BY 1 ORDER BY reads DESC LIMIT 10""").df()
 ```
 
 **A cluster's mutation spectrum:**
 
-```sql
-SELECT REF || '>' || ALT AS substitution, count(*) AS n
-FROM csb0_1_ppm0058 WHERE cluster_label = 42
-GROUP BY 1 ORDER BY n DESC;
+```python
+con.execute("""
+    SELECT REF || '>' || ALT AS substitution, count(*) AS n
+    FROM csb0_1_ppm0058 WHERE cluster_label = 106
+    GROUP BY 1 ORDER BY n DESC""").df()
 ```
 
 **How one cluster distributes across the cohort:**
 
-```sql
-SELECT sample, count(*) AS reads,
-       round(100.0 * count(*) / sum(count(*)) OVER (), 1) AS pct
-FROM all_samples WHERE cluster_label = 42
-GROUP BY 1 ORDER BY reads DESC;
+```python
+con.execute("""
+    SELECT sample, count(*) AS reads,
+           round(100.0 * count(*) / sum(count(*)) OVER (), 1) AS pct
+    FROM all_samples WHERE cluster_label = 106
+    GROUP BY 1 ORDER BY reads DESC""").df()
 ```
 
 **A locus to its cluster:**
 
-```sql
-SELECT sample, CHROM, POS, REF, ALT, cluster_label, umap_1, umap_2
-FROM all_samples
-WHERE CHROM = 'chr7' AND POS BETWEEN 55000000 AND 55100000
-  AND cluster_label IS NOT NULL;
+```python
+con.execute("""
+    SELECT sample, CHROM, POS, REF, ALT, cluster_label, umap_1, umap_2
+    FROM all_samples
+    WHERE CHROM = 'chr1' AND POS BETWEEN 17518000 AND 17519000
+      AND cluster_label IS NOT NULL""").df()
 ```
 
-**Export a cluster for downstream work:**
+**Export a cluster** without routing it through pandas:
 
-```sql
-COPY (SELECT * FROM all_samples WHERE cluster_label = 42)
-  TO 'cluster_42.parquet' (FORMAT PARQUET);
+```python
+con.execute("""
+    COPY (SELECT * FROM all_samples WHERE cluster_label = 106)
+      TO 'cluster_106.parquet' (FORMAT PARQUET)""")
+```
+
+**Stream a large result** in batches instead of materialising it:
+
+```python
+reader = con.execute("SELECT umap_1, umap_2, cluster_label FROM csb0_1_ppm0058 "
+                     "WHERE cluster_label IS NOT NULL").fetch_record_batch(1_000_000)
+for batch in reader:
+    ...   # pyarrow.RecordBatch, ~1 M rows, constant memory
 ```
 
 ---
@@ -143,23 +155,22 @@ COPY (SELECT * FROM all_samples WHERE cluster_label = 42)
 DuckDB pushes predicates down into both parquets and skips row groups that cannot match, so
 a selective query reads a fraction of the data.
 
-- **Per-sample views are the fast path.** `SELECT … FROM csb0_1_ppm0058 WHERE cluster_label = 42`
-  touches one source file (~53 M rows) and one assignment file.
+- **Per-sample views are the fast path.** `WHERE cluster_label = 106` against one view
+  touches one source file (~54 M rows) and one assignment file.
 - **`all_samples` spans 5.08 billion rows.** Filtered queries prune well; an unfiltered
   aggregate genuinely reads everything and will take a long time. Constrain by `sample`,
   `cluster_label`, or `CHROM` wherever you can.
-- **Give it memory and threads** for cohort-wide work:
+- **Set memory, threads and spill directory** before cohort-wide work:
 
-  ```bash
-  python umap_hdbscan_sweep/query_enriched.py \
-      --memory-limit 32GB --threads 8 \
-      --temp-dir /data/lab/ppmseq_parquets/duckdb_tmp \
-      "SELECT sample, count(*) FROM all_samples GROUP BY 1"
+  ```python
+  con.execute("SET memory_limit='32GB'")
+  con.execute("SET threads=8")
+  con.execute("SET temp_directory='/data/lab/ppmseq_parquets/duckdb_tmp'")
   ```
 
   The temp directory matters: DuckDB spills to disk when a query exceeds the memory limit,
   and the default location is on the root partition, which has ~49 GB free. Point it at
-  `/data/lab` (13 TB) before running anything cohort-wide.
+  `/data/lab` (13 TB) before running anything that scans `all_samples`.
 
 ---
 
@@ -229,7 +240,8 @@ python umap_hdbscan_sweep/export_assignments.py \
     --results-dir ~/pure-internship/umap_hdbscan_sweep/per_parquet_inference_cuml
 ```
 
-To build against copies on another machine, rewrite the recorded path prefixes:
+The database embeds absolute paths, so it is not portable by copying. To build against
+copies on another machine, rewrite the recorded prefixes:
 
 ```bash
 python umap_hdbscan_sweep/build_enriched_views.py \
@@ -249,9 +261,10 @@ every stage are in [`pipeline_parameters.md`](pipeline_parameters.md); the model
 listed in [`DEPLOYMENT_MANIFEST.md`](DEPLOYMENT_MANIFEST.md).
 
 Cluster ids are **not comparable across HDBSCAN backends**. The CPU `hdbscan` refit of this
-same cell gives 181 clusters / 8.00 %, and its cluster 42 is not this cluster 42. Everything
-reachable through these views is cuML.
+same cell gives 181 clusters / 8.00 %, and its cluster 106 is not this cluster 106.
+Everything reachable through these views is cuML.
 
 Per-sample noise will not equal the cohort's 7.36 %: that figure describes the 157.5 M-row
 cohort embedding HDBSCAN was fit on, while each sample is labelled by prediction against the
-model and lands wherever its own reads fall. The manifest records the real per-sample figure.
+model and lands wherever its own reads fall. Measured per-sample values run around 9.2 %
+(9.1877 % for `csb0_1_ppm0058`), and `sample_index.noise_pct` carries the real figure for each.
