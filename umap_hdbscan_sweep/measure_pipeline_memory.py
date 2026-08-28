@@ -62,6 +62,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -520,31 +521,11 @@ def measure_hdbscan(args, probe: MemoryProbe, use_gpu: bool) -> dict:
 
 # ── driver ────────────────────────────────────────────────────────────────────
 
-def measure(args) -> dict:
-    probe = MemoryProbe(interval=args.sample_interval).start()
-
-    budget_report = None
-    if args.gpu_budget_gb is not None:
-        with probe.phase_scope("gpu_budget"):
-            budget_report = core.apply_gpu_budget(
-                "apply", budget_gb=args.gpu_budget_gb, rmm_share=args.rmm_share)
-            log(f"    budget: {json.dumps(budget_report)}")
-
-    use_gpu = core.gpu_available() and not args.force_cpu
-    log(f"backend: {'cuML/GPU' if use_gpu else 'CPU'}   stage={args.stage}")
-
-    stages: dict[str, dict] = {}
-    if args.stage in ("umap", "both"):
-        log("=== UMAP stage ===")
-        stages["umap"] = measure_umap(args, probe, use_gpu)
-    if args.stage in ("hdbscan", "both"):
-        log("=== HDBSCAN stage ===")
-        stages["hdbscan"] = measure_hdbscan(args, probe, use_gpu)
-
-    probe.stop()
-
+def build_payload(args, probe: MemoryProbe, stages: dict, budget_report, use_gpu: bool,
+                  complete: bool) -> dict:
     payload = {
         "generated_utc": datetime.now(timezone.utc).isoformat(),
+        "complete": complete,
         "note": ("Peaks are high-water marks with everything earlier still resident, not "
                  "per-phase deltas. Run with --rmm-share 0 for demand; a pool masks it. "
                  "With --stage both the hdbscan peaks inherit the umap stage's residue -- "
@@ -571,15 +552,91 @@ def measure(args) -> dict:
             for name, entry in probe.phases.items()
         },
     }
+    if not complete:
+        payload["open_phase"] = probe.phase
+        payload["elapsed_seconds"] = round(perf_counter() - probe.started_at, 1)
+        payload["note"] = ("PARTIAL -- the run did not finish. The open phase's peak is "
+                           "a lower bound on what that phase needed. " + payload["note"])
     if args.trace:
         payload["trace"] = probe.trace
     return payload
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    """Write via a temp file + rename so a kill mid-write cannot truncate the last good one."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2))
+    temporary.replace(path)
+
+
+def measure(args) -> dict:
+    probe = MemoryProbe(interval=args.sample_interval).start()
+
+    budget_report = None
+    if args.gpu_budget_gb is not None:
+        with probe.phase_scope("gpu_budget"):
+            budget_report = core.apply_gpu_budget(
+                "apply", budget_gb=args.gpu_budget_gb, rmm_share=args.rmm_share)
+            log(f"    budget: {json.dumps(budget_report)}")
+
+    use_gpu = core.gpu_available() and not args.force_cpu
+    log(f"backend: {'cuML/GPU' if use_gpu else 'CPU'}   stage={args.stage}")
+
+    stages: dict[str, dict] = {}
+
+    # A 25M fit runs for ~50 minutes inside a single library call, and systemd-oomd on
+    # miletus kills on memory *pressure* rather than exhaustion -- so the run that most
+    # needs measuring is exactly the one most likely to be killed before it can report.
+    # Checkpointing the peaks turns that kill from "51 minutes and nothing" into "51
+    # minutes and a lower bound", which is the number the report actually needs.
+    def snapshot(complete: bool) -> dict:
+        return build_payload(args, probe, stages, budget_report, use_gpu, complete)
+
+    if args.out:
+        out_path = Path(args.out)
+
+        def checkpoint_loop() -> None:
+            while not checkpoint_stop.wait(args.checkpoint_seconds):
+                try:
+                    _write_json(out_path, snapshot(complete=False))
+                except Exception:
+                    pass                       # a failed checkpoint must never kill the run
+
+        checkpoint_stop = threading.Event()
+        threading.Thread(target=checkpoint_loop, daemon=True).start()
+
+        def on_signal(signum, _frame):
+            log(f"signal {signum} -- writing the partial profile before exiting")
+            probe.stop()
+            try:
+                _write_json(out_path, snapshot(complete=False))
+                log(f"wrote partial {out_path}")
+            except Exception as exc:
+                log(f"could not write the partial profile: {exc}")
+            os._exit(143 if signum == signal.SIGTERM else 130)
+
+        signal.signal(signal.SIGTERM, on_signal)
+        signal.signal(signal.SIGINT, on_signal)
+
+    if args.stage in ("umap", "both"):
+        log("=== UMAP stage ===")
+        stages["umap"] = measure_umap(args, probe, use_gpu)
+    if args.stage in ("hdbscan", "both"):
+        log("=== HDBSCAN stage ===")
+        stages["hdbscan"] = measure_hdbscan(args, probe, use_gpu)
+
+    probe.stop()
+    return snapshot(complete=True)
 
 
 def print_report(payload: dict) -> None:
     print()
     print("=" * 78)
     print(f"  Memory profile -- stage={payload['stage']} ({payload['backend']})")
+    if not payload.get("complete", True):
+        print(f"  PARTIAL -- killed during '{payload.get('open_phase')}' after "
+              f"{payload.get('elapsed_seconds')}s. Peaks are LOWER BOUNDS.")
     print("=" * 78)
     print(f"  device total                 {payload['device_total_gb']:>8.2f} GB")
     print(f"  PEAK device VRAM used        {payload['peaks']['device_used_gb']:>8.2f} GB   "
@@ -663,6 +720,9 @@ def parse_args() -> argparse.Namespace:
                         help="0 (default) = no RMM pool, so the device reading tracks real "
                              "demand. 0.85 reproduces the sweep's pooled configuration.")
     parser.add_argument("--sample-interval", type=float, default=0.25)
+    parser.add_argument("--checkpoint-seconds", type=float, default=30.0,
+                        help="rewrite --out this often with the peaks so far, so a run "
+                             "killed mid-fit still leaves a lower bound behind")
     parser.add_argument("--force-cpu", action="store_true")
     parser.add_argument("--trace", action="store_true",
                         help="include the full per-sample trace in the JSON")
@@ -680,10 +740,8 @@ def main() -> int:
     payload = measure(args)
     print_report(payload)
     if args.out:
-        out = Path(args.out)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(payload, indent=2))
-        log(f"wrote {out}")
+        _write_json(Path(args.out), payload)
+        log(f"wrote {args.out}")
     return 0
 
 
