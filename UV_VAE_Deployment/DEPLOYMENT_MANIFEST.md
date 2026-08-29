@@ -238,8 +238,11 @@ Three of those are invisible to a dependency scanner and must not be pruned:
 Removed on 2026-08-29 as superseded: `low_noise_hdbscan.py` and its tmux runner (they produce
 the wrong 170-cluster cell this folder previously shipped), `probe_cuml_model.py`,
 `backfill_fit_indices.py`, the two `phase_a_*timing.py` scripts and their runner,
-`visualize_merge_check.py`, and `train_rq_vae.py`. All remain in the working repository; only
-the deployment copy was pruned.
+`visualize_merge_check.py`, and `train_rq_vae.py`. Also `FINAL_MODELS_RUNBOOK.md`, which was
+the working procedure for correcting this folder to the selected cell — it instructs running
+two of the deleted scripts and states that the deployment holds the 170-cluster model, which
+was true before 2026-08-29 and is not now. All remain in the working repository; only the
+deployment copy was pruned.
 
 ---
 
