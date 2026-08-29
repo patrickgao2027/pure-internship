@@ -336,32 +336,37 @@ STATS_ONLY=1 bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
 It scans all 95 files once for row counts and normalisation statistics, writing
 `stats_cache.json`. Without it the first real run pays that cost before training starts.
 
-### The script defaults are NOT the shipped configuration
+### Configuration
 
-`tmux_train_multi.sh` has drifted from the run that produced `models/vae/model.pt`. Four
-variables differ, and two of them (batch size, KL weight) change the model materially:
+Every training parameter is overridable — 41 environment variables in the runner, 33 `--flags`
+on the CLI beneath it. The runner's defaults **are** the shipped configuration, so the bare
+invocation above reproduces `models/vae/model.pt`:
 
-| Variable | Script default | **Shipped run** |
-|---|---|---|
-| `BATCH_SIZE` | 32,768 | **1,048,576** |
-| `KL_WEIGHT` | 0.05 | **0.005** |
-| `HIDDEN_DROPOUT` | 0.4 | **0.1** |
-| `DECODE_WORKERS` | 1 | **8** |
+| | |
+|---|---|
+| Architecture | `LATENT_DIM=16`, `HIDDEN_DIMS=256,128` |
+| Optimisation | `BATCH_SIZE=1048576`, `LEARNING_RATE=1e-3`, `KL_WEIGHT=0.005` |
+| Regularisation | `INPUT_DROPOUT=0.1`, `HIDDEN_DROPOUT=0.1` |
+| Stopping | `EPOCH_CEILING=40`, `PATIENCE=8`, `MIN_DELTA=0.001`, `AU_THRESHOLD=0.01` |
+| Data | `TRAIN_FRACTION=0.9`, `SPLIT_STRATEGY=global_site_hash`, `SEED=42` |
+| Throughput | `EPOCH_SHARDS=20`, `SHUFFLE_BUFFER_ROWS=32768`, `DECODE_WORKERS=8`, `VAL_MAX_ROWS=5000000` |
 
-`DECODE_WORKERS=1` is a throughput bug rather than a modelling one — it leaves the GPU
-starved while a single process decodes parquet. Everything else (`INPUT_DROPOUT` 0.1,
-`LEARNING_RATE` 1e-3, `LATENT_DIM` 16, `HIDDEN_DIMS` 256,128, `TRAIN_FRACTION` 0.9, `SEED` 42,
-`EPOCH_CEILING` 40, `EPOCH_SHARDS` 20, `SHUFFLE_BUFFER_ROWS` 32768, `VAL_MAX_ROWS` 5,000,000)
-already matches.
-
-**To reproduce the shipped model**, override all four, and point the two path variables at
-the miletus layout — they default to the `$HOME/uv_vae` sibling layout that tosun uses, not
-the `$HOME/pure-internship` clone:
+Override any of them inline:
 
 ```bash
-tmux new-session -d -s train_multi '
-  UV_VAE_DIR=$HOME/pure-internship/uv_vae   EARLY_STOPPING_DIR=$HOME/pure-internship/Early_Stopping_Tests   BATCH_SIZE=1048576 KL_WEIGHT=0.005 HIDDEN_DROPOUT=0.1 DECODE_WORKERS=8   bash Early_Stopping_Tests/scripts/tmux_train_multi.sh'
+KL_WEIGHT=0.01 HIDDEN_DROPOUT=0.2 EPOCH_CEILING=60   bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
 ```
+
+> Four of these defaults were corrected on 2026-08-29. They previously read
+> `HIDDEN_DROPOUT=0.4`, `BATCH_SIZE=32768`, `KL_WEIGHT=0.05`, `DECODE_WORKERS=1` — carried
+> over from the single-parquet dropout experiments this runner grew out of. A bare run
+> therefore trained a materially different model (ten times the KL weight, four times the
+> hidden dropout) while appearing to reproduce the shipped one. If you have a run that
+> predates that date, check its `training_report.json` rather than assuming.
+
+`UV_VAE_DIR` and `EARLY_STOPPING_DIR` auto-detect the `$HOME/pure-internship` clone on
+miletus and fall back to the `$HOME/uv_vae` sibling layout tosun uses, so neither normally
+needs setting.
 
 ### Direct CLI form
 

@@ -81,17 +81,25 @@ EPOCH_SHARDS="${EPOCH_SHARDS:-20}"
 PATIENCE="${PATIENCE:-8}"
 MIN_DELTA="${MIN_DELTA:-0.001}"
 AU_THRESHOLD="${AU_THRESHOLD:-0.01}"
+# These four defaults are the values the SHIPPED cohort model was trained with
+# (models/vae/model.pt, run_20260802T192814Z). They previously read 0.4 / 32768 /
+# 0.05 / 1, carried over from the single-parquet dropout experiments this script
+# grew out of -- so running it bare trained a materially different model (10x the
+# KL weight, 4x the hidden dropout) while looking like a reproduction. Every one
+# is still overridable; only the default moved.
 INPUT_DROPOUT="${INPUT_DROPOUT:-0.1}"
-HIDDEN_DROPOUT="${HIDDEN_DROPOUT:-0.4}"
-BATCH_SIZE="${BATCH_SIZE:-32768}"
+HIDDEN_DROPOUT="${HIDDEN_DROPOUT:-0.1}"
+BATCH_SIZE="${BATCH_SIZE:-1048576}"
 LATENT_DIM="${LATENT_DIM:-16}"
 HIDDEN_DIMS="${HIDDEN_DIMS:-256,128}"
 LEARNING_RATE="${LEARNING_RATE:-1e-3}"
-KL_WEIGHT="${KL_WEIGHT:-0.05}"
+KL_WEIGHT="${KL_WEIGHT:-0.005}"
 TRAIN_FRACTION="${TRAIN_FRACTION:-0.9}"
 SPLIT_STRATEGY="${SPLIT_STRATEGY:-global_site_hash}"
 SHUFFLE_BUFFER_ROWS="${SHUFFLE_BUFFER_ROWS:-32768}"
-DECODE_WORKERS="${DECODE_WORKERS:-1}"
+# 1 starves the GPU while a single process decodes parquet; 8 is what the cohort
+# run used. A throughput setting, not a modelling one.
+DECODE_WORKERS="${DECODE_WORKERS:-8}"
 VAL_MAX_ROWS="${VAL_MAX_ROWS:-5000000}"
 WARMUP_STEPS="${WARMUP_STEPS:-0}"
 TEST_PARQUET="${TEST_PARQUET:-}"
