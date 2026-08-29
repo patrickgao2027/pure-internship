@@ -160,18 +160,9 @@ and re-run, not just read.
 
 All five arrays in `coords/` are **row-aligned by position**: row *i* of
 `vae_latent_16d.npy`, `umap_coords_2d.npy`, `cohort_labels.npy`,
-`cohort_probabilities.npy`, and `context.parquet` describe the same read. That alignment is only valid for this
-particular stage-0 dedup output — re-running dedup produces a different row order
-and invalidates the join.
-
-### Verifying the transfer
-
-Check file sizes after any onward copy. A `scp` of the 9.4 GB latent array was
-interrupted by a connection reset while this folder was being assembled and left
-a silently truncated file. The array is a small header followed by a flat block
-of float32 — a short read yields a *valid-looking* `.npy` with fewer rows, not an
-error, which would misalign it against the UMAP coordinates and labels. The copy
-here was re-pulled and its md5 matches the source (`5161343b70a5…`).
+`cohort_probabilities.npy`, and `context.parquet` describe the same read. That
+alignment is only valid for this particular stage-0 dedup output — re-running
+dedup produces a different row order and invalidates the join.
 
 ## 5. `results/` — signature assignments
 
