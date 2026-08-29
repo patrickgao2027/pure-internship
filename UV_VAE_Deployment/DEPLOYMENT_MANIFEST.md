@@ -84,7 +84,7 @@ The only code meant to be reused; everything else imports from it.
 
 ## 3. `umap_hdbscan_sweep/` — projection, clustering, signatures
 
-All 57 modules, 16 runners, and the test suite. The first 22 below are the
+55 modules, 15 runners, and the test suite. The first 22 below are the
 production pipeline (the transitive import closure of the stages); the rest are
 the parameter sweeps, scaling studies, and plotting code that justify every
 parameter in `pipeline_parameters.md` — included so the choices can be audited
@@ -99,10 +99,12 @@ and re-run, not just read.
 | `parametric_umap.py` | The parametric UMAP encoder — a neural network trained to approximate the UMAP embedding function so new rows project in one forward pass. |
 | `stage2_sweep.py`, `parametric_sweep.py` | Fits the encoder across the size × parameter grid and scores each cell. Produced the selected 25M / nn15 / md0.1 configuration. |
 | `stage3_apply_full.py`, `apply_parametric_full.py` | **Applies the fitted encoder to the full cohort** (157.5 M rows → 2-D coordinates). |
-| `low_noise_hdbscan.py` | **The cohort clustering stage.** Fits HDBSCAN on 1 M UMAP coordinates (mcs 2500, ms 1, ε 0.05), labels the whole cohort, builds the per-cluster SBS96 matrix, and runs SigProfilerAssignment against `uv_only`. |
-| `hdbscan_param_sweep.py` | The parameter sweep `low_noise_hdbscan.py` imports its fit/label/score helpers from. |
+| `hdbscan_param_sweep.py` | **The cohort clustering stage.** Fits HDBSCAN on 1 M UMAP coordinates per grid cell, labels the whole cohort, saves the model + `fit_indices.npy`, builds the per-cluster SBS96 matrix, and runs SigProfilerAssignment against `uv_only`. The shipped model is its `fit1000000_mcs2500_ms15_eom` cell (mcs 2500, ms 15, ε 0.0). |
 | `fast_predict.py` | **The RBC (Random Ball Cover) approximate-predict backend.** Precomputes a ball-cover index over the fit points so labelling new rows is sub-linear instead of O(n · fit_size). This is what makes per-sample labelling take seconds instead of minutes. |
-| `per_parquet_inference.py` | **Per-sample inference.** For each of the 95 parquets: VAE encode → parametric UMAP → HDBSCAN `approximate_predict` → SigProfiler → plots. Streams in 5 M-row batches so peak memory is bounded by batch size, not sample size. |
+| `per_parquet_inference.py` | **Per-sample inference.** For each parquet: VAE encode → parametric UMAP → HDBSCAN label via `fast_predict` → SigProfiler → plots. Streams in 5 M-row batches so peak memory is bounded by batch size, not sample size. Dynamically imports `run_variant_cluster_pipeline` inside its SigProfiler subprocess worker. |
+| `export_assignments.py` | Collects the per-sample assignments into a manifest, re-checking every source fingerprint; `--attach` materialises enriched parquets. |
+| `build_enriched_views.py` | Builds a DuckDB database of views joining each source to its assignments — the merged view without the copy. See [`ACCESSING_ASSIGNMENTS.md`](ACCESSING_ASSIGNMENTS.md). |
+| `verify_saved_models.py` | Loads a saved cell from disk and proves it still labels correctly: pickle loads, `fit_indices` match, held rows reproduce. |
 | `attach_row_ids.py` | Backfills `file_row_number` into the per-sample results so coordinates and labels join back to source parquet rows. |
 | `verify_source_fingerprint.py` | Checks size / mtime / footer SHA-256 before any join is trusted — detects silent source-file drift. |
 | `sweep_core.py` | Shared plumbing: paths, GPU budget wiring, checkpoint loading. Imported by nearly every stage. |
@@ -116,7 +118,7 @@ and re-run, not just read.
 | File | Why it is included |
 |---|---|
 | `tmux_per_parquet_inference.sh` | Runs the 95-sample inference sweep. Also the clearest documentation of the runtime inputs — every path the pipeline needs appears as an overridable environment variable at the top. |
-| `tmux_low_noise_hdbscan.sh` | Runs the cohort clustering stage. |
+| `tmux_final_models.sh` | Fits and saves the selected cell (or the full grid with `FULL_GRID=1`) for both backends. |
 | `tmux_attach_row_ids.sh` | Runs the row-id backfill. |
 | `run_stage2_16gb.sh`, `run_parametric_sweep.sh`, `save_final_models.sh` | UMAP fitting sweep and model export. |
 
@@ -126,11 +128,10 @@ and re-run, not just read.
 |---|---|---|
 | UMAP selection | `parameter_sweep`, `size_convergence`, `seed_stability`, `stability_sweep`, `global_structure`, `compare_cells` | The size × parameter grid and the seed-stability replicates that selected 25M / nn15 / md0.1. |
 | HDBSCAN selection | `hdbscan_scaling_sweep`, `clustering_regime_sweep`, `aggregate_clustering_regime`, `condensed_tree_report`, `cohort_cluster_report` | The fit-size scaling study (500 K → 50 M) and the regime comparison that selected mcs 2500 / ms 1 / ε 0.05. The 50 M cell is where the GPU ran out of memory. |
-| Timing | `phase_a_timing`, `phase_a_hdbscan_timing` | The benchmarks behind the timing figures in the parameter sheet. |
 | Cluster analysis | `cluster_profiles`, `cluster_quality`, `feature_discrimination`, `clustering_core` | Per-cluster feature profiling and quality scoring. |
 | Row recovery | `recover_source_columns`, `label_dedup_source`, `verify_enriched` | Joining results back to source parquet rows and verifying the join. |
-| Plotting (12) | `plot_*`, `visualize_merge_check` | Every figure in the analysis: feature atlas, cluster dominance, sample enrichment, cosine similarity, sweep comparison. |
-| Other | `build_stratified_embed`, `make_test_dataset`, `train_rq_vae` | Stratified embedding construction, held-out test set, and the RQ-VAE variant experiment. |
+| Plotting (11) | `plot_*` | Every figure in the analysis: feature atlas, cluster dominance, sample enrichment, cosine similarity, sweep comparison. |
+| Other | `build_stratified_embed`, `make_test_dataset`, `recover_source_columns` | Stratified embedding construction, held-out test set, and recovery of source identity by fingerprint join when it has been lost. |
 | `tests/` | 12 files | Unit tests for the sweep and assignment code. |
 
 > Shell scripts have already been converted to LF line endings. If they are edited
@@ -209,6 +210,38 @@ on identical input, same seed and same parameters, hold the cluster count stable
 but move the noise boundary by roughly 0.3 percentage points. Refitting to
 "reproduce" a shipped model will not return the shipped labels — use the saved
 `hdbscan_model.pkl` and `fit_indices.npy` instead.
+
+## 5b. Which code is load-bearing
+
+Of the Python in this folder, **19 files are required to run the pipeline**; the rest is the
+sweep and analysis code kept for provenance — the evidence behind each parameter choice.
+
+| Location | Required files |
+|---|---|
+| `umap_hdbscan_sweep/` | `per_parquet_inference`, `fast_predict`, `parametric_umap`, `aumap`, `sweep_core`, `export_assignments`, `build_enriched_views`, `verify_saved_models`, `verify_source_fingerprint`, `cross_size_ari` |
+| `uv_vae/uv_vae/` | `__init__`, `features`, `data`, `model`, `preprocess`, `inference`, `training`, `gpu_budget` |
+| `uv_vae/scripts/` | `run_variant_cluster_pipeline` |
+
+Plus one data file: `umap_hdbscan_sweep/signature_db/uv_only_SBS_GRCh38.tsv`, the `uv_only`
+reference SigProfiler assigns against.
+
+Three of those are invisible to a dependency scanner and must not be pruned:
+
+- **`run_variant_cluster_pipeline.py`** is imported *dynamically inside the SigProfiler
+  subprocess worker* (`import run_variant_cluster_pipeline as rvcp`). Nothing references it
+  statically. Without it a run proceeds normally until the first SigProfiler step, then every
+  worker fails.
+- **`gpu_budget.py`** is imported lazily inside `sweep_core.apply_gpu_budget()`, not at module
+  level.
+- **`__init__.py`** is the package marker; `import uv_vae` fails without it.
+
+Removed on 2026-08-29 as superseded: `low_noise_hdbscan.py` and its tmux runner (they produce
+the wrong 170-cluster cell this folder previously shipped), `probe_cuml_model.py`,
+`backfill_fit_indices.py`, the two `phase_a_*timing.py` scripts and their runner,
+`visualize_merge_check.py`, and `train_rq_vae.py`. All remain in the working repository; only
+the deployment copy was pruned.
+
+---
 
 ## 6. `docs/` — decision records
 

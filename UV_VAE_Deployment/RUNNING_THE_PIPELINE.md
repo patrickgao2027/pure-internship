@@ -19,6 +19,60 @@ in [`pipeline_parameters.md`](pipeline_parameters.md); which file is what is in
 | Environment | micromamba env `uv_vae` on miletus (`micromamba activate uv_vae`) |
 | Input | one or more parquet files carrying the feature columns in `uv_vae/ml_features.json`, plus `CHROM`, `POS`, `REF`, `ALT`, `st`, `et`, `FILT` |
 
+### Libraries
+
+Everything the pipeline imports, and which stage needs it:
+
+| Package | Needed for | Source |
+|---|---|---|
+| `torch` | VAE encoder, parametric UMAP encoder, GPU budget | `pyproject.toml` (CUDA-12.8 index on Linux) |
+| `numpy` | everywhere | `pyproject.toml` |
+| `polars` | frames handed to the VAE (`encode_frame` takes a `pl.DataFrame`) | `pyproject.toml` |
+| `duckdb` | all parquet reading, filtering, and the join | `pyproject.toml` |
+| `pyarrow` | Arrow batch streaming, parquet writing | `pyproject.toml` |
+| `scikit-learn` | neighbour index fallback in `fast_predict` | `pyproject.toml` |
+| `hdbscan` | CPU reference implementation, DBCV scoring | `pyproject.toml` (`>=0.8.42`) |
+| `umap-learn` | UMAP utilities | `pyproject.toml` (`>=0.5.12`) |
+| `joblib` | loading `hdbscan_model.pkl`, parallel workers | `pyproject.toml` (via scikit-learn) |
+| `matplotlib`, `pillow` | the four per-sample plots | `pyproject.toml` |
+| `sigprofilerassignment` | `uv_only` signature assignment | `pyproject.toml` (`>=1.1.3`) |
+| `tqdm` | progress bars (set `TQDM_DISABLE=1` for batch runs) | `pyproject.toml` |
+| **`cuml`** | **GPU HDBSCAN — required to unpickle the model** | **RAPIDS (conda), not pyproject** |
+| **`cupy`** | GPU array ops in the UMAP apply path | **RAPIDS (conda), not pyproject** |
+| **`rmm`** | GPU memory pool that `gpu_budget` configures | **RAPIDS (conda), not pyproject** |
+
+**`uv sync` alone does not produce a working environment.** The three RAPIDS packages are
+imported by the pipeline but are not in `pyproject.toml`, because they install from the
+`rapidsai` conda channel rather than PyPI. On miletus they are already present in the
+`uv_vae` micromamba env. Elsewhere, create the env first and add the Python deps into it:
+
+```bash
+micromamba create -n uv_vae -c rapidsai -c conda-forge -c nvidia \
+    cuml cupy rmm python=3.12 cuda-version=12.8
+micromamba activate uv_vae
+cd uv_vae && uv sync --active
+```
+
+Check the GPU stack resolves before starting a long run — this is also the fastest way to
+confirm a machine can load the shipped model at all:
+
+```bash
+python -c "
+import cuml, cupy, rmm, torch
+print('cuml', cuml.__version__, '| cupy', cupy.__version__, '| torch', torch.__version__)
+print('cuda available:', torch.cuda.is_available())
+import joblib; joblib.load('models/hdbscan/hdbscan_model.pkl'); print('model unpickles OK')
+"
+```
+
+`sigprofilerassignment` pulls in TensorFlow transitively — the TF banner in the logs comes
+from there, not from pipeline code. No pipeline file imports TensorFlow or Keras; the
+parametric UMAP encoder is a plain torch `nn.Module` loaded from `.pt`.
+
+Every path falls back to CPU **except** unpickling the HDBSCAN model. A CPU-only machine can
+read every `.npy` and `.parquet` in this folder and run the VAE, but cannot load
+`hdbscan_model.pkl`.
+
 The row filter is fixed at `st = 'MIXED' AND et = 'MIXED' AND FILT = 1`. It is hard-coded in
 `per_parquet_inference.py` rather than exposed as a flag, because the VAE's normalisation
 statistics were computed over exactly that population — encoding a different one produces a

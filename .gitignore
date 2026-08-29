@@ -85,3 +85,10 @@ parquet_files/
 **/results/cluster_plots/
 **/results/cluster_sweep_plots/
 **/results/feature_atlas*/
+
+# Trained model binaries. hdbscan_model.pkl is 171 MB -- over GitHub's 100 MB
+# hard limit, so committing it does not merely bloat the repo, it makes the push
+# fail. The .npy/.parquet rules above already cover the coordinate arrays; this
+# covers the pickles beside them. Models are distributed with the deployment
+# folder, not through git.
+*.pkl

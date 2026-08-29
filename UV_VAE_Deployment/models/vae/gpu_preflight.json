@@ -1,0 +1,83 @@
+{
+  "environment": {
+    "cuda_available": true,
+    "torch_version": "2.10.0",
+    "device_name": "NVIDIA RTX PRO 5000 Blackwell",
+    "device_total_gb": 47.27,
+    "capability": "sm_120",
+    "cuda_runtime": "13.0",
+    "arch_list": [
+      "sm_75",
+      "sm_80",
+      "sm_86",
+      "sm_90",
+      "sm_100",
+      "sm_110",
+      "sm_120",
+      "compute_120"
+    ]
+  },
+  "checks": [
+    {
+      "check": "cuda_available",
+      "ok": true,
+      "required": true,
+      "detail": "NVIDIA RTX PRO 5000 Blackwell (47.27 GB, sm_120)"
+    },
+    {
+      "check": "arch_support",
+      "ok": true,
+      "required": true,
+      "detail": "sm_120 is in the wheel's arch list (sm_75, sm_80, sm_86, sm_90, sm_100, sm_110, sm_120, compute_120). Blackwell needs a cu128 or newer torch build; pyproject already points at the cu128 index."
+    },
+    {
+      "check": "cublas_workspace",
+      "ok": true,
+      "required": true,
+      "detail": "CUBLAS_WORKSPACE_CONFIG=':4096:8'. Must be exported by the shell before python starts -- setting it inside seed_everything() is too late, because cuBLAS reads it when the handle is created."
+    },
+    {
+      "check": "deterministic_algorithms",
+      "ok": true,
+      "required": true,
+      "detail": "matmul + embedding backward ran under use_deterministic_algorithms(True)"
+    },
+    {
+      "check": "budget_cap",
+      "ok": true,
+      "required": true,
+      "detail": "capped at 16.0 GB of 47.27 GB (torch fraction 0.3385)"
+    },
+    {
+      "check": "batch_fits",
+      "ok": true,
+      "required": false,
+      "detail": "batch_size=1,048,576 needs about 5.6 GB; the budget allows up to 1,788,017 rows. "
+    },
+    {
+      "check": "allocation_probe",
+      "ok": true,
+      "required": true,
+      "detail": "allocated and freed a 1,048,576-row numeric block under the cap"
+    },
+    {
+      "check": "optional_cudf",
+      "ok": true,
+      "required": false,
+      "detail": "present -- streaming.py uses it to encode chunks on GPU"
+    },
+    {
+      "check": "optional_cuml",
+      "ok": true,
+      "required": false,
+      "detail": "present -- only wanted for GPU UMAP/HDBSCAN; it must NOT load during training"
+    },
+    {
+      "check": "optional_rmm",
+      "ok": true,
+      "required": false,
+      "detail": "present -- needed to bound the cuDF/cuML pool"
+    }
+  ],
+  "failed": false
+}
