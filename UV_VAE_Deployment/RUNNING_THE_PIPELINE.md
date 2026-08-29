@@ -4,10 +4,13 @@ Applying the shipped checkpoints to parquet files that were not part of the coho
 **parquet → DuckDB filter → VAE encode → parametric UMAP → HDBSCAN label → SBS96 →
 SigProfiler `uv_only`**, then joining the coordinates and labels back onto the source rows.
 
-Nothing here retrains anything. Every model is loaded from `models/` and applied, so results
-stay comparable to the cohort run and to each other. What was used to *build* those models is
-in [`pipeline_parameters.md`](pipeline_parameters.md); which file is what is in
-[`DEPLOYMENT_MANIFEST.md`](DEPLOYMENT_MANIFEST.md).
+Sections 0–6 and 8 **retrain nothing** — every model is loaded from `models/` and applied, so
+results stay comparable to the cohort run and to each other. [§7](#7-retraining-the-vae-on-all-95-parquets)
+is the exception: it retrains the VAE across all 95 parquets, which invalidates everything
+downstream of it. Read its warning before running it.
+
+What was used to *build* these models is in [`pipeline_parameters.md`](pipeline_parameters.md);
+which file is what is in [`DEPLOYMENT_MANIFEST.md`](DEPLOYMENT_MANIFEST.md).
 
 ---
 
@@ -304,7 +307,99 @@ The shipped model passes all three — 200,000/200,000 probe rows reproduced.
 
 ---
 
-## 7. Encoding to the latent space only
+## 7. Retraining the VAE on all 95 parquets
+
+Everything above *applies* the shipped checkpoints. This section retrains the VAE itself
+across the whole cohort — a different entry point, and a much larger commitment.
+
+**Read this first.** A new VAE produces a different latent space. That invalidates the
+parametric UMAP encoder (fitted against the old latent), which invalidates `coords.npy`,
+which invalidates the HDBSCAN model, `cohort_labels.npy`, every per-sample assignment, and
+every SigProfiler result. Retraining is the first step of rebuilding the whole pipeline, not
+a step you can take in isolation. If you only want to apply the existing model to new data,
+§2 is what you want.
+
+### The runner
+
+```bash
+tmux new-session -d -s train_multi 'bash Early_Stopping_Tests/scripts/tmux_train_multi.sh'
+tmux attach -t train_multi
+```
+
+Run the statistics preflight once first — it is cheap, and its cache is reused by the
+training run itself:
+
+```bash
+STATS_ONLY=1 bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
+```
+
+It scans all 95 files once for row counts and normalisation statistics, writing
+`stats_cache.json`. Without it the first real run pays that cost before training starts.
+
+### The script defaults are NOT the shipped configuration
+
+`tmux_train_multi.sh` has drifted from the run that produced `models/vae/model.pt`. Four
+variables differ, and two of them (batch size, KL weight) change the model materially:
+
+| Variable | Script default | **Shipped run** |
+|---|---|---|
+| `BATCH_SIZE` | 32,768 | **1,048,576** |
+| `KL_WEIGHT` | 0.05 | **0.005** |
+| `HIDDEN_DROPOUT` | 0.4 | **0.1** |
+| `DECODE_WORKERS` | 1 | **8** |
+
+`DECODE_WORKERS=1` is a throughput bug rather than a modelling one — it leaves the GPU
+starved while a single process decodes parquet. Everything else (`INPUT_DROPOUT` 0.1,
+`LEARNING_RATE` 1e-3, `LATENT_DIM` 16, `HIDDEN_DIMS` 256,128, `TRAIN_FRACTION` 0.9, `SEED` 42,
+`EPOCH_CEILING` 40, `EPOCH_SHARDS` 20, `SHUFFLE_BUFFER_ROWS` 32768, `VAL_MAX_ROWS` 5,000,000)
+already matches.
+
+**To reproduce the shipped model**, override all four, and point the two path variables at
+the miletus layout — they default to the `$HOME/uv_vae` sibling layout that tosun uses, not
+the `$HOME/pure-internship` clone:
+
+```bash
+tmux new-session -d -s train_multi '
+  UV_VAE_DIR=$HOME/pure-internship/uv_vae   EARLY_STOPPING_DIR=$HOME/pure-internship/Early_Stopping_Tests   BATCH_SIZE=1048576 KL_WEIGHT=0.005 HIDDEN_DROPOUT=0.1 DECODE_WORKERS=8   bash Early_Stopping_Tests/scripts/tmux_train_multi.sh'
+```
+
+### Direct CLI form
+
+`--parquet-paths` (globs accepted) is what selects the interleaved trainer; it is *refused*
+alongside `--parquet-path`, `--streaming`, `--use-all` or `--sample-rows` rather than
+silently ignoring them.
+
+```bash
+python "Early_Stopping_Tests/Python Files/train_with_early_stopping.py"     --parquet-paths '/data/lab/ppmseq_parquets/*.featuremap.parquet'     --feature-spec-path uv_vae/ml_features.json     --output-dir <run root>     --row-filter "st = 'MIXED' AND et = 'MIXED' AND FILT = 1"     --epochs 40 --patience 8 --min-delta 0.001     --batch-size 1048576 --latent-dim 16 --hidden-dims 256,128     --learning-rate 1e-3 --kl-weight 0.005     --input-dropout 0.1 --hidden-dropout 0.1     --train-fraction 0.9 --seed 42     --epoch-shards 20 --shuffle-buffer-rows 32768 --decode-workers 8     --val-max-rows 5000000 --stats-cache-path uv_vae/stats_cache.json
+```
+
+### Cost and outputs
+
+The shipped run took **4 h 25 m** — 38 of 40 epochs over 5,078,201,907 filtered rows on one
+RTX PRO 5000, torch capped at 16 GB. Early stopping fired on the combined rule: validation
+loss improving by < 0.001 relative **and** active units holding at 16, both for 8 consecutive
+epochs. Best epoch was 30; the two later epochs were saved but not selected.
+
+Output lands in a timestamped `run_YYYYMMDDTHHMMSSZ/` directory: `model.pt`,
+`feature_report.json`, `preprocess_report.json`, `training_report.json`, `summary.json`, and
+`diagnostics_report.json`. All three trainers write this same set — that contract is what lets
+`inference.py` and the clustering stages consume any run unchanged.
+
+Sanity-check a new run against the shipped one before building on it:
+
+```bash
+python -c "
+import json; s=json.load(open('<run>/summary.json'))['early_stopping']
+print('best epoch', s['best_epoch'], '| val', round(s['best_val_total_loss'],4),
+      '| active units', s['final_active_units'])"
+```
+
+The shipped model reads `best epoch 30 | val 0.2209 | active units 16`. Active units below 16
+means latent dimensions collapsed and the run should not be used.
+
+---
+
+## 8. Encoding to the latent space only
 
 If you want the 16-D VAE latent without the projection and clustering:
 
