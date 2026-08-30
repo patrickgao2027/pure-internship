@@ -63,12 +63,6 @@ KL_WEIGHT=0.01 HIDDEN_DROPOUT=0.2 EPOCH_CEILING=60   bash Early_Stopping_Tests/s
 | Data | `TRAIN_FRACTION=0.9`, `SPLIT_STRATEGY=global_site_hash`, `SEED=42` |
 | Throughput | `EPOCH_SHARDS=20`, `SHUFFLE_BUFFER_ROWS=32768`, `DECODE_WORKERS=8`, `VAL_MAX_ROWS=5000000` |
 
-> Four of these were corrected on 2026-08-29 — they previously read `HIDDEN_DROPOUT=0.4`,
-> `BATCH_SIZE=32768`, `KL_WEIGHT=0.05`, `DECODE_WORKERS=1`, carried over from the
-> single-parquet experiments this runner grew out of. A bare run therefore trained a
-> materially different model while appearing to reproduce the shipped one. For any run
-> predating that date, check its `training_report.json` rather than assuming.
-
 `--parquet-paths` (globs) selects the interleaved trainer; it is *refused* alongside
 `--parquet-path`, `--streaming`, `--use-all` or `--sample-rows` rather than silently ignored.
 
