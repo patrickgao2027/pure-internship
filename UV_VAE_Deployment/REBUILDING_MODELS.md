@@ -87,10 +87,33 @@ bash umap_hdbscan_sweep/run_parametric_sweep.sh
 ```
 
 Sweeps `SIZES=2000000,5000000,10000000,25000000` × `NN=15,30,50` ×
-`MIN_DIST=0.0,0.1,0.25` × `SEEDS=3`, reading `EMBED_DIR` for `latent.npy`. Point `EMBED_DIR`
-at the new stage-1 output. `models/umap/final_models_README.md` records how the shipped
-encoder (25 M / nn 15 / md 0.1) was selected from the candidates and which controls it was
-compared against.
+`MIN_DIST=0.0,0.1,0.25` × `MODES=regress,umap,hybrid` × `SEEDS=3` replicates, reading
+`EMBED_DIR` for `latent.npy`. Point `EMBED_DIR` at the new stage-1 output.
+
+**You usually don't need the sweep.** It exists to *choose* the parameters, and that choice is
+already made — `models/umap/final_models_README.md` records how the shipped encoder was
+selected and against which controls. If you are rebuilding only because the latent changed,
+fit the one configuration directly. Every grid variable is a comma-separated list, so a single
+value each gives a one-cell grid:
+
+```bash
+SIZES=25000000 NN=15 MIN_DIST=0.1 MODES=umap SEEDS=1 \
+  bash umap_hdbscan_sweep/run_parametric_sweep.sh
+```
+
+That still runs the trial, gate and cost-projection stages. To skip straight to the fit:
+
+```bash
+python umap_hdbscan_sweep/parametric_sweep.py \
+    --embed-dir <new stage-1 output> --output-dir <out> \
+    --fit-rows 25000000 --min-dist 0.1 --n-neighbors 15 --modes umap --seeds 1 \
+    --gpu-budget-gb 40
+```
+
+> The shipped parameters were selected against the *old* latent space. Reusing them on a new
+> one is the sensible default, not a guarantee they remain optimal — if the VAE changed
+> materially, a reduced sweep (say `NN=15,30` × `MIN_DIST=0.1,0.25` at one size) is the cheap
+> middle ground.
 
 Then project the whole cohort to get a new `coords.npy`:
 
@@ -110,10 +133,12 @@ python umap_hdbscan_sweep/apply_parametric_full.py --help
 tmux new-session -d -s final_models 'bash umap_hdbscan_sweep/tmux_final_models.sh'
 ```
 
-Defaults to the selected cell (`FIT_SIZES=1000000`, `MIN_CLUSTER_SIZES=2500`,
-`MIN_SAMPLES=15`, `METHODS=eom`, `EPSILONS=0.0`) for both backends
-(`BACKENDS=cuml,cpu`), with `DBCV_BACKEND=hdbscan` pinned so the two are comparable.
-`FULL_GRID=1` runs the whole sweep instead.
+**This is already a single cell** — it defaults to the selected configuration
+(`FIT_SIZES=1000000`, `MIN_CLUSTER_SIZES=2500`, `MIN_SAMPLES=15`, `METHODS=eom`,
+`EPSILONS=0.0`) for both backends (`BACKENDS=cuml,cpu`), with `DBCV_BACKEND=hdbscan` pinned so
+the two are comparable. The full 24-cell sweep is opt-in via `FULL_GRID=1`. Use
+`BACKENDS=cuml` to skip the CPU cross-check, which exists only for the diagnostics cuML does
+not expose.
 
 **After a retrain you must override `COORDS` and `CONTEXT`.** They default to the
 August-2026 run's paths, so a bare invocation clusters the *old* embedding while appearing to
