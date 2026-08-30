@@ -1,0 +1,28 @@
+# Line endings.
+#
+# core.autocrlf=true alone does not protect the repository: with no attributes
+# file, all 74 shell scripts were committed WITH CRLF, so every checkout on the
+# HPC produced scripts bash cannot run ("$'\r': command not found"). The
+# `sed -i 's/\r$//'` step in the run notes existed only to undo that.
+#
+# eol=lf pins the checked-out line ending regardless of platform or autocrlf,
+# for the file types that must run on Linux.
+
+*.sh   text eol=lf
+*.py   text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+
+# Binary — never touch these.
+*.npy  binary
+*.pkl  binary
+*.pt   binary
+*.parquet binary
+*.png  binary
+*.xlsx binary
+*.docx binary
+*.tar.gz binary
+*.zip  binary
