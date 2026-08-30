@@ -11,7 +11,8 @@ Parameters for every stage are in [`pipeline_parameters.md`](pipeline_parameters
 
 ```
 UV_VAE_Deployment/
-├── RUNNING_THE_PIPELINE.md         how to apply the checkpoints to new data  ← start here
+├── RUNNING_INFERENCE.md            apply the checkpoints to new data  ← start here
+├── REBUILDING_MODELS.md            retrain VAE / UMAP / HDBSCAN from scratch
 ├── ACCESSING_ASSIGNMENTS.md        how to read coordinates + labels back per row
 ├── pipeline_parameters.md          parameter master sheet (all stages)
 ├── DEPLOYMENT_MANIFEST.md          this file — what every file is and why
@@ -29,7 +30,8 @@ UV_VAE_Deployment/
 
 | Goal | Read |
 |---|---|
-| Run the pipeline on new parquets | [`RUNNING_THE_PIPELINE.md`](RUNNING_THE_PIPELINE.md) |
+| Run the pipeline on new parquets | [`RUNNING_INFERENCE.md`](RUNNING_INFERENCE.md) |
+| Retrain any stage from scratch | [`REBUILDING_MODELS.md`](REBUILDING_MODELS.md) |
 | Query UMAP coordinates + cluster labels per row | [`ACCESSING_ASSIGNMENTS.md`](ACCESSING_ASSIGNMENTS.md) |
 | Look up a hyperparameter or a reported metric | [`pipeline_parameters.md`](pipeline_parameters.md) |
 | Find out what a particular file is | this file |
@@ -219,8 +221,7 @@ Three of those are invisible to a dependency scanner and must not be pruned:
   level.
 - **`__init__.py`** is the package marker; `import uv_vae` fails without it.
 
-This folder is a pruned subset of the working repository: superseded scripts and one-off
-diagnostics are not carried over. Nothing here depends on them.
+
 
 ---
 
@@ -236,7 +237,6 @@ diagnostics are not carried over. Nothing here depends on them.
 
 ## Deliberately excluded
 
-- **Raw parquet data** — 95 files, several TB, read-only in the shared lab folder at `/data/lab/ppmseq_parquets/` on miletus.
-- **Intermediate sweep outputs** — the per-cell embeddings and reports from the UMAP and HDBSCAN grids. The code that produces them is included; the artifacts are large and regenerable.
+
 - **`cohort_probabilities.npy`** (601 MB) — HDBSCAN membership strengths, one float per row. The hard labels in `cohort_labels.npy` carry the result; this is only needed to threshold membership differently.
 - **`sbs96_index.npy`** (151 MB) — a cache mapping each row to its SBS96 channel. Rebuilt automatically from `context.parquet` on first use.

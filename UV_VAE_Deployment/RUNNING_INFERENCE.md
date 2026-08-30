@@ -1,18 +1,19 @@
-# Running the pipeline
+# Running inference
 
 Applying the shipped checkpoints to new parquet files:
 **parquet → filter → VAE encode → parametric UMAP → HDBSCAN label → SBS96 → SigProfiler
 `uv_only`**, then joining coordinates and labels back onto the source rows.
 
-Sections 1–5 retrain nothing — every model is loaded and applied, so results stay comparable
-to the cohort run. [§6](#6-rebuilding-the-models) covers rebuilding the VAE, UMAP and HDBSCAN
-from scratch, where each stage invalidates everything below it.
+Nothing here retrains anything — every model is loaded from `models/` and applied, so results
+stay comparable to the cohort run and to each other. To rebuild the models themselves, see
+[`REBUILDING_MODELS.md`](REBUILDING_MODELS.md).
 
 | | |
 |---|---|
 | Parameters behind these models | [`pipeline_parameters.md`](pipeline_parameters.md) |
 | What each file is | [`DEPLOYMENT_MANIFEST.md`](DEPLOYMENT_MANIFEST.md) |
 | Querying the results | [`ACCESSING_ASSIGNMENTS.md`](ACCESSING_ASSIGNMENTS.md) |
+| Retraining from scratch | [`REBUILDING_MODELS.md`](REBUILDING_MODELS.md) |
 
 ---
 
@@ -188,138 +189,7 @@ The shipped model passes all three — 200,000/200,000 probe rows reproduced.
 
 ---
 
-## 6. Rebuilding the models
-
-Each stage consumes the one above it, so retraining any stage invalidates everything below.
-The VAE is the top of the chain — a new latent space retires the UMAP encoder, `coords.npy`,
-the HDBSCAN model, every label and every SigProfiler result.
-
-| # | Stage | Entry point | Produces | Cost |
-|---|---|---|---|---|
-| 0 | Dedup | `stage0_dedup.py` | 157.5 M loci from 5.08 B reads, one per `(CHROM,POS,REF,ALT)` | — |
-| 1 | VAE train | `Early_Stopping_Tests/scripts/tmux_train_multi.sh` | `model.pt` | 4 h 25 m |
-| 2 | VAE encode | `stage1_embed.py` | `latent.npy` (N×16), `context.parquet` | — |
-| 3 | UMAP fit | `run_parametric_sweep.sh` | candidate encoders across the grid | — |
-| 4 | UMAP apply | `apply_parametric_full.py` | `coords.npy` (N×2) | ~22 s |
-| 5 | HDBSCAN | `tmux_final_models.sh` | model, `fit_indices.npy`, labels, SigProfiler | 18.7 s fit + 127 s label per cell |
-| 6 | Per-sample | `tmux_per_parquet_inference.sh` | the 95-sample outputs (§2) | ~24 h |
-
-Only stages 1, 4, 5 and 6 have measured timings; the others were not separately recorded.
-
-**Stage 0 → 2 order is the contract.** `latent.npy` and `context.parquet` are row-aligned by
-position, and so is everything derived from them. Re-running dedup produces a different row
-order and silently invalidates every downstream array.
-
----
-
-### Retraining the VAE (stage 1)
-
-```bash
-# preflight once — cheap, and the training run reuses its cache
-STATS_ONLY=1 bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
-
-# then train
-tmux new-session -d -s train_multi 'bash Early_Stopping_Tests/scripts/tmux_train_multi.sh'
-```
-
-The runner's defaults **are** the shipped configuration, so this reproduces
-`models/vae/model.pt`. Everything is overridable — 41 environment variables in the runner, 33
-`--flags` on the CLI beneath it:
-
-```bash
-KL_WEIGHT=0.01 HIDDEN_DROPOUT=0.2 EPOCH_CEILING=60   bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
-```
-
-| | |
-|---|---|
-| Architecture | `LATENT_DIM=16`, `HIDDEN_DIMS=256,128` |
-| Optimisation | `BATCH_SIZE=1048576`, `LEARNING_RATE=1e-3`, `KL_WEIGHT=0.005` |
-| Regularisation | `INPUT_DROPOUT=0.1`, `HIDDEN_DROPOUT=0.1` |
-| Stopping | `EPOCH_CEILING=40`, `PATIENCE=8`, `MIN_DELTA=0.001`, `AU_THRESHOLD=0.01` |
-| Data | `TRAIN_FRACTION=0.9`, `SPLIT_STRATEGY=global_site_hash`, `SEED=42` |
-| Throughput | `EPOCH_SHARDS=20`, `SHUFFLE_BUFFER_ROWS=32768`, `DECODE_WORKERS=8`, `VAL_MAX_ROWS=5000000` |
-
-> Four of these were corrected on 2026-08-29 — they previously read `HIDDEN_DROPOUT=0.4`,
-> `BATCH_SIZE=32768`, `KL_WEIGHT=0.05`, `DECODE_WORKERS=1`, carried over from the
-> single-parquet experiments this runner grew out of. A bare run therefore trained a
-> materially different model while appearing to reproduce the shipped one. For any run
-> predating that date, check its `training_report.json` rather than assuming.
-
-`--parquet-paths` (globs) selects the interleaved trainer; it is *refused* alongside
-`--parquet-path`, `--streaming`, `--use-all` or `--sample-rows` rather than silently ignored.
-
-Verify before building on it:
-
-```bash
-python -c "
-import json; s=json.load(open('<run>/summary.json'))['early_stopping']
-print('best epoch', s['best_epoch'], '| val', round(s['best_val_total_loss'],4),
-      '| active units', s['final_active_units'])"
-```
-
-Shipped model reads `best epoch 30 | val 0.2209 | active units 16`. Active units below 16
-means latent dimensions collapsed — don't use that run.
-
----
-
-### Refitting UMAP (stages 3–4)
-
-```bash
-bash umap_hdbscan_sweep/run_parametric_sweep.sh
-```
-
-Sweeps `SIZES=2000000,5000000,10000000,25000000` × `NN=15,30,50` ×
-`MIN_DIST=0.0,0.1,0.25` × `SEEDS=3`, reading `EMBED_DIR` for `latent.npy`. Point `EMBED_DIR`
-at the new stage-1 output. `models/umap/final_models_README.md` records how the shipped
-encoder (25 M / nn 15 / md 0.1) was selected from the candidates and which controls it was
-compared against.
-
-Then project the whole cohort to get a new `coords.npy`:
-
-```bash
-python umap_hdbscan_sweep/apply_parametric_full.py --help
-```
-
-> **Cluster counts are seed-sensitive** — 508–533 at 25 M and 142–184 at 5 M with nothing
-> changing but the training seed. Treat any single count as approximate when comparing
-> candidates.
-
----
-
-### Refitting HDBSCAN (stage 5)
-
-```bash
-tmux new-session -d -s final_models 'bash umap_hdbscan_sweep/tmux_final_models.sh'
-```
-
-Defaults to the selected cell (`FIT_SIZES=1000000`, `MIN_CLUSTER_SIZES=2500`,
-`MIN_SAMPLES=15`, `METHODS=eom`, `EPSILONS=0.0`) for both backends
-(`BACKENDS=cuml,cpu`), with `DBCV_BACKEND=hdbscan` pinned so the two are comparable.
-`FULL_GRID=1` runs the whole sweep instead.
-
-**After a retrain you must override `COORDS` and `CONTEXT`.** They default to the
-August-2026 run's paths, so a bare invocation clusters the *old* embedding while appearing to
-succeed:
-
-```bash
-COORDS=<new>/coords.npy CONTEXT=<new>/context.parquet   bash umap_hdbscan_sweep/tmux_final_models.sh
-```
-
-> **Don't use `tmux_param_sweep.sh` for anything you'll report.** It defaults
-> `CLUSTER_BACKEND=auto`, which silently prefers cuML whenever cuML imports. That is how a
-> sweep written to a directory named `param_sweep_refit_cpu` turned out to be cuML, and how
-> "backends identical, ARI 1.0000" got published from a cuML-vs-cuML comparison. Set
-> `CLUSTER_BACKEND` explicitly, or use `tmux_final_models.sh`, which sets it per backend.
-
-cuML HDBSCAN is **not bit-reproducible**: two fits on identical input with the same seed hold
-the cluster count stable but move the noise boundary by ~0.3 pp. Refitting will not return the
-shipped labels — use the saved `hdbscan_model.pkl` and `fit_indices.npy` instead.
-
-Verify each cell with `verify_saved_models.py` (§5) before consuming it.
-
----
-
-## 7. Latent space only
+## 6. Latent space only
 
 To encode without projecting or clustering:
 
