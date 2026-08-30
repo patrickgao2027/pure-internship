@@ -52,7 +52,12 @@ DBCV_BACKEND="${DBCV_BACKEND:-auto}"
 # real wall time -- CPU HDBSCAN fit at 500K rows measured 6.7s on miletus, but this has
 # not been benchmarked past that size on this project's embedding; time a probe cell
 # before setting this for large FIT_SIZES.
-CLUSTER_BACKEND="${CLUSTER_BACKEND:-auto}"
+# Explicit, not "auto". auto prefers cuML whenever cuML imports, so the value recorded
+# in the run reflects a resolution rather than an intent -- which is how a sweep written
+# to a directory named param_sweep_refit_cpu turned out to be cuML, and how "backends
+# identical, ARI 1.0000" got published from a cuML-vs-cuML comparison. cuml is the
+# deployed backend; set CLUSTER_BACKEND=cpu to fit with the hdbscan package instead.
+CLUSTER_BACKEND="${CLUSTER_BACKEND:-cuml}"
 
 if command -v micromamba &>/dev/null; then
     eval "$(micromamba shell hook --shell bash)"

@@ -51,7 +51,8 @@ The runner's defaults **are** the shipped configuration, so this reproduces
 `--flags` on the CLI beneath it:
 
 ```bash
-KL_WEIGHT=0.01 HIDDEN_DROPOUT=0.2 EPOCH_CEILING=60   bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
+KL_WEIGHT=0.01 HIDDEN_DROPOUT=0.2 EPOCH_CEILING=60 \
+  bash Early_Stopping_Tests/scripts/tmux_train_multi.sh
 ```
 
 | | |
@@ -145,14 +146,16 @@ August-2026 run's paths, so a bare invocation clusters the *old* embedding while
 succeed:
 
 ```bash
-COORDS=<new>/coords.npy CONTEXT=<new>/context.parquet   bash umap_hdbscan_sweep/tmux_final_models.sh
+COORDS=<new>/coords.npy CONTEXT=<new>/context.parquet \
+  bash umap_hdbscan_sweep/tmux_final_models.sh
 ```
 
-> **Don't use `tmux_param_sweep.sh` for anything you'll report.** It defaults
-> `CLUSTER_BACKEND=auto`, which silently prefers cuML whenever cuML imports. That is how a
-> sweep written to a directory named `param_sweep_refit_cpu` turned out to be cuML, and how
-> "backends identical, ARI 1.0000" got published from a cuML-vs-cuML comparison. Set
-> `CLUSTER_BACKEND` explicitly, or use `tmux_final_models.sh`, which sets it per backend.
+> **Always name the backend in the output directory, and check it afterwards.**
+> `metrics.json` records both `cluster_backend_requested` and the `cluster_backend` that
+> actually ran — compare them before reporting anything. A sweep once written to a directory
+> called `param_sweep_refit_cpu` was in fact cuML, and "backends identical, ARI 1.0000" was
+> published from a cuML-vs-cuML comparison. Both runners now default to `cuml` explicitly
+> rather than resolving `auto` at import time, but the directory name is still just a name.
 
 cuML HDBSCAN is **not bit-reproducible**: two fits on identical input with the same seed hold
 the cluster count stable but move the noise boundary by ~0.3 pp. Refitting will not return the
