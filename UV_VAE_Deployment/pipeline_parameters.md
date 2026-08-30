@@ -75,7 +75,7 @@ Stopped when **both** conditions held for `patience = 8` consecutive epochs:
 | Seed | 42 |
 | Encoder fit time (25M rows) | 102 s |
 | Full-cohort apply time (157.5M rows) | 22 s |
-| GPU VRAM | Not separately recorded in sweep artifacts |
+| GPU VRAM, apply stage | see §3 *GPU VRAM* — measured jointly with the VAE and HDBSCAN apply |
 
 ---
 
@@ -113,11 +113,9 @@ Stopped when **both** conditions held for `patience = 8` consecutive epochs:
 | Mean probability, held-out rows | 0.8339 |
 | Cluster persistence (median) | 1.0000 — *degenerate, see note* |
 
-> **DBCV changed backend.** An earlier version of this sheet reported **0.4313**, scored with
-> the `kdbcv` backend. The deployed run pins `DBCV_BACKEND=hdbscan` so the cuML and CPU
-> figures are computed by the same implementation and are therefore comparable — which they
-> were not before. 0.4074 and 0.4313 describe the *same partition* scored two ways; neither is
-> wrong, but only the `hdbscan` figure belongs beside the CPU column below.
+> An earlier version of this sheet, and the sweep dashboard, report **0.4313** for this cell.
+> That is the same partition scored with the `kdbcv` backend instead of `hdbscan`. The
+> deployed run pins `DBCV_BACKEND=hdbscan`.
 
 ### Signature Fit — SigProfilerAssignment (`uv_only`, GRCh38, v3.5)
 
@@ -135,43 +133,58 @@ Stopped when **both** conditions held for `patience = 8` consecutive epochs:
 
 ### CPU Cross-Check (reference implementation, *not* the deployed model)
 
-The same cell refit with CPU `hdbscan` 0.8.44 to obtain the diagnostics cuML does not expose:
+The same cell refit with CPU `hdbscan` 0.8.44 to obtain the diagnostics cuML does not expose.
+These come from the `param_sweep_refit_cpu` run, not the sweep that produced the deployed
+model — same parameters, but not measured alongside it:
 
 | Metric | cuML (deployed) | CPU `hdbscan` |
 |---|---|---|
 | Clusters | 175 | 181 |
 | Noise (cohort) | 7.36 % | 8.00 % |
-| DBCV (`hdbscan` backend, both) | 0.4074 | 0.3674 † |
+| DBCV (`hdbscan` backend, both) | 0.4074 | 0.3674 |
 | Relative validity | not exposed | 0.2160 |
 | Points in negative-DBCV clusters | 11.85 % | 13.12 % |
 | Mean membership probability | 0.8284 | 0.8105 |
 | Cluster persistence (median / min / max) | 1.0 / 1.0 / 1.0 (degenerate) | 0.1086 / 0.0009 / 0.6069 |
-| Fit / label time | 18.7 s / 127.0 s | 10.7 s / 120.1 s † |
+| Fit / label time | 18.7 s / 127.0 s | 10.7 s / 120.1 s |
 
-**Backend note (important).** cuML and CPU HDBSCAN are two implementations of the same
-algorithm and do not produce identical partitions: across the full 24-cell sweep grid they
-differ on **every** cell, with cuML's cluster count ranging from 7.3 % below to 22.6 % above
-the CPU count. The cuML fit is the deployed model because it is the one the sweep selected
-this cell on and the one all reported clustering and signature metrics were computed from.
-cuML does not populate `outlier_scores_` or `exemplars_` and returns a degenerate
-`cluster_persistence_` of exactly 1.0 for every cluster, so persistence, GLOSH outlier scores
-and exemplars can only be quoted from the CPU refit — and must be labelled as coming from a
-181-cluster partition, not the deployed 175-cluster one.
+**Backend note.** cuML and CPU `hdbscan` are different implementations of the same algorithm,
+so the same parameters give different partitions — across the 24-cell sweep grid they differ on
+every cell. cuML is the deployed model and the source of every reported clustering and
+signature metric. Persistence, GLOSH outlier scores and exemplars are available only from the
+CPU refit, and describe its **181-cluster** partition, not the deployed 175-cluster one.
 
-DBCV **is** comparable across the two columns above, which it was not previously: both are now
-scored with the `hdbscan` backend on independent 400-points-per-cluster stratified samples.
+Full 24-cell comparison: `umap_hdbscan_sweep/hdbscan/hdbscan_sweep_comparison.xlsx`.
 
-† The CPU column comes from the August-2026 `param_sweep_refit_cpu` run of this cell, not from
-the `sweep_both_backends` run that produced the deployed cuML model. The two CPU fits use
-identical parameters, but CPU `hdbscan` figures here have not been re-verified against the
-later sweep. Read them as the reference implementation's behaviour on this cell, not as
-numbers measured alongside the shipped model.
+### GPU VRAM
 
-An earlier version of this sheet reported 170 clusters at ms = 1, eps = 0.05, 6.88 % noise.
-Those values came from the `low_noise_hdbscan` run — a **different parameter cell** — and were
-incorrect for this section regardless of backend. See
-`umap_hdbscan_sweep/hdbscan/hdbscan_sweep_comparison.xlsx` for the full 24-cell backend
-comparison.
+Measured on the deployed hardware (RTX PRO 5000 Blackwell, 48 GB / 48,935 MiB), sampled every
+2 s across the full 95-sample per-parquet run — 22,427 samples over 12 h 37 m:
+
+| | VRAM |
+|---|---|
+| Peak, whole pipeline (VAE encode + UMAP apply + HDBSCAN label + SigProfiler) | **19.7 GB** (20,214 MiB) |
+| Median while running | 7.2 GB (7,384 MiB) |
+| Idle floor between samples | 0.09 GB |
+| Budget requested (`GPU_BUDGET_GB`) | 44 GB |
+
+The three stages share one process and one budget, so these are joint figures rather than
+per-stage ones. Peak sits at **45 % of the requested budget**, so 24 GB is ample for inference
+and 44 GB is generous headroom rather than a requirement.
+
+Budgets are split by stage — `apply` gives RMM half (cuML) and torch half, `sweep` gives RMM
+0.9 since no torch is loaded:
+
+| Stage | Budget | Split |
+|---|---|---|
+| VAE training | 16 GB | all torch (RMM absent); ~5.63 GB projected per 1,048,576-row batch |
+| Per-parquet inference (`apply`) | 44 GB | 22 GB RMM + 22 GB torch |
+| Clustering sweep (`sweep`) | 40 GB | 36 GB RMM + 4 GB torch |
+
+**HDBSCAN fit VRAM is not directly measured** — only the budget it ran under. The binding
+constraint is known from failures rather than instrumentation: at 25 M fit rows, `ms=15` OOMs
+on this card while `ms=5` completes, which is why `--max-ms-at-25m 5` exists. The deployed cell
+fits 1 M rows and is nowhere near that ceiling.
 
 ### Saved Artefacts
 
