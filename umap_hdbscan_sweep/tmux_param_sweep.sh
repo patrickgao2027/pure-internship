@@ -44,7 +44,10 @@ SEED="${SEED:-42}"
 DBCV_PER_CLUSTER="${DBCV_PER_CLUSTER:-400}"
 # 'auto' prefers k-DBCV when PYTHONPATH exposes it (up to 42x faster at k=400, see
 # SWEEP_METRICS.md), else falls back to hdbscan's validity_index.
-DBCV_BACKEND="${DBCV_BACKEND:-auto}"
+# Pinned, not "auto". auto prefers k-DBCV, tmux_final_models.sh pins hdbscan, and DBCV
+# is not comparable across the two -- the deployed cell reads 0.4313 scored one way and
+# 0.4074 the other. Both runners must agree or their cells cannot be ranked together.
+DBCV_BACKEND="${DBCV_BACKEND:-hdbscan}"
 # cuML's HDBSCAN does not implement outlier_scores_ or exemplars_ at all, and its
 # cluster_persistence_ is degenerate (measured: exactly 1.0 for every cluster on a real
 # cell, vs 0.10-0.15 median from an equivalent CPU fit). 'cpu' forces the hdbscan package
