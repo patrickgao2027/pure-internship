@@ -94,10 +94,8 @@ python umap_hdbscan_sweep/per_parquet_inference.py \
 ```
 </details>
 
-**Two traps:**
+**One trap:**
 
-- **`--epsilon` defaults to `0.05`**, but the deployed cell is `0.0`. It's ignored when
-  `--hdbscan-model` is given, but pass it anyway so the logged configuration is honest.
 - **`fit_indices.npy` is load-bearing.** `fast_predict` indexes the fit set *positionally*.
   The wrong index file — or one re-derived from a mismatched `(seed, fit_rows)` — labels every
   read against the wrong neighbours. No error; just wrong.

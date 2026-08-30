@@ -529,7 +529,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output-dir", required=True)
     p.add_argument("--mcs", type=int, default=2500)
     p.add_argument("--ms", type=int, default=15)
-    p.add_argument("--epsilon", type=float, default=0.05)
+    p.add_argument("--epsilon", type=float, default=0.0,
+                   help="cluster_selection_epsilon for the fallback fit. Ignored "
+                        "when --hdbscan-model is given. 0.0 is the deployed cell; "
+                        "the 0.05 this used to default to came from a parameter "
+                        "cell that was abandoned.")
     p.add_argument("--fit-rows", type=int, default=1_000_000)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--genome-build", default="GRCh38")
