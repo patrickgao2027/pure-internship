@@ -94,23 +94,26 @@ def source_columns(connection, source: str) -> list[str]:
 def build_view_sql(name: str, source: str, assignments: str, columns: list[str]) -> str:
     """One sample's join, as a view definition.
 
-    The source's own columns are listed rather than selected with ``src.*`` so that a source
-    which already carries a ``file_row_number`` column cannot collide with the one the reader
-    generates -- duckdb would emit two columns of that name and the join predicate would be
-    ambiguous. Ours is exposed as ``file_row_number`` because it is the row identity the
-    assignments key against, and callers need it to trace a row back to its position.
+    The source's own columns are listed rather than selected with ``src.*`` so the generated
+    ``file_row_number`` is projected exactly once and unambiguously. It is exposed under that
+    name because it is the row identity the assignments key against, and callers need it to
+    trace a row back to its position in the source.
     """
-    key = "file_row_number"
-    if key in columns:
-        key = "__frn"
-        select_key = f'src."{key}" AS file_row_number'
-    else:
-        select_key = "src.file_row_number"
+    # duckdb REFUSES file_row_number=true on a file that already carries that column, and
+    # the option is a boolean -- there is no way to ask for the generated id under another
+    # name. Such a source could never have been labelled either, since per_parquet_inference
+    # reads it the same way, so this means the file changed after inference. Refuse rather
+    # than substitute row_number(), whose order is not guaranteed to match.
+    if "file_row_number" in columns:
+        raise ValueError(
+            "source already has a file_row_number column, so duckdb cannot generate the "
+            "positional id the assignments key against. The file must have changed since "
+            "inference ran -- re-run inference for this sample.")
 
     projected = ", ".join(f'src."{c}"' for c in columns)
-    projected = f"{projected}, {select_key}" if projected else select_key
-    read_source = (f"read_parquet('{source}', file_row_number=true)" if key == "file_row_number"
-                   else f"read_parquet('{source}', file_row_number='{key}')")
+    projected = f"{projected}, src.file_row_number" if projected else "src.file_row_number"
+    read_source = f"read_parquet('{source}', file_row_number=true)"
+    key = "file_row_number"
     return f"""CREATE OR REPLACE VIEW {name} AS
 SELECT {projected},
        asg.umap_1        AS umap_1,

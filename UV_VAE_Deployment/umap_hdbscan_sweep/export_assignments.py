@@ -219,10 +219,16 @@ def attach(record: dict, out_dir: Path, args) -> dict:
     # rather than guessing which one the assignment file meant.
     existing = {row[0] for row in connection.execute(
         f"DESCRIBE SELECT * FROM read_parquet('{source}') LIMIT 0").fetchall()}
+    # See build_enriched_views for why this is refused rather than worked around: duckdb
+    # rejects file_row_number=true on a file that already has that column, and the option
+    # takes no alternative name.
+    if "file_row_number" in existing:
+        result["status"] = ("FAILED: source already has a file_row_number column, so the "
+                            "positional join key cannot be generated. The file must have "
+                            "changed since inference ran -- re-run inference for this sample.")
+        connection.close()
+        return result
     key = "file_row_number"
-    if key in existing:
-        key = "__frn_join_key"
-        log(f"  note: source already has a file_row_number column; joining on {key}")
 
     join_type = "INNER" if args.filtered_only else "LEFT"
     select_columns = ", ".join(f'src."{name}"' for name in sorted(existing)) or "src.*"
@@ -237,9 +243,6 @@ def attach(record: dict, out_dir: Path, args) -> dict:
                    ON src.file_row_number = asg.file_row_number
         ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION {args.compression})
     """
-    if key != "file_row_number":
-        query = query.replace("src.file_row_number", f"src.{key}")
-
     started = perf_counter()
     try:
         connection.execute(query)
