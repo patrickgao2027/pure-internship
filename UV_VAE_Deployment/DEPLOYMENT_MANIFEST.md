@@ -1,7 +1,7 @@
 # UV_VAE Deployment — File Manifest
 
 Everything required to reproduce or re-run the full pipeline:
-**parquet → VAE → latent (µ) → parametric UMAP → HDBSCAN → SigProfiler (`uv_only`)**
+**parquet → VAE → latent → parametric UMAP → HDBSCAN → SigProfiler (`uv_only`)**
 
 Parameters for every stage are in [`pipeline_parameters.md`](pipeline_parameters.md).
 
@@ -189,13 +189,6 @@ consistent at 175 clusters / 7.3553 % noise. Verified with
 `cohort_labels.npy` at `fit_indices`, and 200,000 held rows re-label exactly as
 the sweep recorded.
 
-An earlier assembly of this folder shipped the `low_noise_mcs2500_ms1_eps0.05`
-model (ms=1, eps=0.05, **170 clusters**) beside *correct* 175-cluster labels —
-a model and labels from different partitions, whose cluster ids did not
-correspond. Anything derived from this folder before 2026-08-29 should be
-re-checked against `models/hdbscan/metrics.json`, which now records the backend
-and cluster count that actually ran.
-
 Note also that cuML's HDBSCAN is **not bit-reproducible across runs**: two fits
 on identical input, same seed and same parameters, hold the cluster count stable
 but move the noise boundary by roughly 0.3 percentage points. Refitting to
@@ -226,14 +219,8 @@ Three of those are invisible to a dependency scanner and must not be pruned:
   level.
 - **`__init__.py`** is the package marker; `import uv_vae` fails without it.
 
-Removed on 2026-08-29 as superseded: `low_noise_hdbscan.py` and its tmux runner (they produce
-the wrong 170-cluster cell this folder previously shipped), `probe_cuml_model.py`,
-`backfill_fit_indices.py`, the two `phase_a_*timing.py` scripts and their runner,
-`visualize_merge_check.py`, and `train_rq_vae.py`. Also `FINAL_MODELS_RUNBOOK.md`, which was
-the working procedure for correcting this folder to the selected cell — it instructs running
-two of the deleted scripts and states that the deployment holds the 170-cluster model, which
-was true before 2026-08-29 and is not now. All remain in the working repository; only the
-deployment copy was pruned.
+This folder is a pruned subset of the working repository: superseded scripts and one-off
+diagnostics are not carried over. Nothing here depends on them.
 
 ---
 
