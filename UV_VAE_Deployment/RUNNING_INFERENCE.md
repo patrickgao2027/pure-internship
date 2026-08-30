@@ -51,8 +51,9 @@ joblib.load('models/hdbscan/hdbscan_model.pkl'); print('model unpickles OK')"
 **Input** must carry the feature columns in `uv_vae/ml_features.json` plus `CHROM`, `POS`,
 `REF`, `ALT`, `st`, `et`, `FILT`. The row filter is fixed at
 `st = 'MIXED' AND et = 'MIXED' AND FILT = 1` and deliberately not a flag — the VAE's
-normalisation statistics were computed over exactly that population. Expect **~21 %** of rows
-to survive (measured: 53.9 M of 255.3 M).
+normalisation statistics were computed over exactly that population. Survival varies by sample — **21-28 %** across the two measured (53.9 M of 255.3 M for
+csb0-1-ppm0058; 14.4 M of 51.3 M for xpcR2-b2-ppm0016). Source sizes differ widely too, so
+size the output by the labelled count in the manifest rather than by a fixed fraction.
 
 ---
 
