@@ -8,6 +8,12 @@ The three columns were never written into the source files. A DuckDB database of
 them on demand instead — it is kilobytes, and `SELECT *` returns the same result a merged
 table would. [§5](#5-why-nothing-was-merged) covers the trade.
 
+> **Per read, or per site?** This document is about the **per-read** view: 5.08 B reads across
+> 95 samples, joined to their source parquets. It needs miletus, because the join reads those
+> 569 GB in place. For **per-site** work — 157.5 M deduplicated loci — the arrays in
+> `models/coords/` are already aligned and need no join, no database and no cluster access.
+> See [§7b](#7b-cohort-level-data-needs-none-of-this).
+
 ---
 
 ## 1. Query it
@@ -158,7 +164,19 @@ to get past the refusal.
 
 ## 7. Rebuilding
 
-The database is disposable — kilobytes, seconds to rebuild:
+**Three inputs are required, and none of them are in `UV_VAE_Deployment/`:**
+
+| Input | Where | Size |
+|---|---|---|
+| the 95 source parquets | `/data/lab/ppmseq_parquets/` | 569 GB, read in place |
+| the 95 `row_assignments.parquet` | `per_parquet_inference_cuml/<sample>/` | 43 GB |
+| `assignments_manifest.json` | `per_parquet_inference_cuml/` | derived from the above |
+
+All three live on miletus, so the database cannot be rebuilt from the deployment folder alone.
+That is a property of the join, not an oversight: it reads the sources in place, and they are
+569 GB.
+
+The database itself is disposable — kilobytes, seconds to rebuild:
 
 ```bash
 python umap_hdbscan_sweep/build_enriched_views.py \
@@ -181,6 +199,29 @@ another machine, rewrite the prefixes with `--source-root` / `--new-source-root`
 `--assignments-root` / `--new-assignments-root`.
 
 ---
+
+## 7b. Cohort-level data needs none of this
+
+`UV_VAE_Deployment/models/coords/` holds a **different** set of coordinates and labels — one
+row per deduplicated locus rather than per read:
+
+| File | Rows |
+|---|---|
+| `umap_coords_2d.npy`, `cohort_labels.npy`, `cohort_probabilities.npy`, `vae_latent_16d.npy`, `context.parquet` | 157,501,580 |
+
+These are **positionally aligned** — row *i* of each describes the same locus — so they need no
+join, no database and no cluster access:
+
+```python
+import numpy as np
+xy  = np.load("models/coords/umap_coords_2d.npy", mmap_mode="r")
+lab = np.load("models/coords/cohort_labels.npy",  mmap_mode="r")   # row i ↔ row i
+```
+
+The two answer different questions. The cohort arrays count each **site** once (157.5 M); the
+views count each **read** (5.08 B), so a locus seen in 40 samples appears 40 times. Use the
+cohort arrays for questions about sites, the views for questions about coverage or for
+anything that has to reach the original parquet columns.
 
 ## 8. Provenance
 
