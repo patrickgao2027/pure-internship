@@ -80,6 +80,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--all", action="store_true", help="plot every finished cell")
     p.add_argument("--color-by", choices=["cluster", "substitution", "sigprofiler"],
                    default="cluster")
+    p.add_argument("--no-banner", action="store_true",
+                   help="omit the red uv_only caveat drawn above sigprofiler panels. The "
+                        "caveat still applies -- put it in the figure caption instead.")
     p.add_argument("--sig-run", default="sigprofilerassignment_uv_only_grch38_v3.5",
                    help="which SigProfiler output dir to read Activities.txt from "
                         "(default: the uv_only run present in all 28 cells; pass "
@@ -258,7 +261,8 @@ def main() -> int:
                                   color=NOISE_COLOUR, label="noise"))
             fig.legend(handles=handles, loc="lower center", ncol=min(len(handles), 7),
                        frameon=False, fontsize=9, bbox_to_anchor=(0.5, -0.01))
-            if args.color_by == "sigprofiler" and args.sig_run.startswith("sigprofilerassignment_uv_only"):
+            if (args.color_by == "sigprofiler" and not args.no_banner
+                    and args.sig_run.startswith("sigprofilerassignment_uv_only")):
                 fig.text(0.5, 0.965, "uv_only reference: every cluster forced into a UV "
                          "signature regardless of true content (see Phase 0)",
                          ha="center", fontsize=8, color="#a04040")
@@ -266,7 +270,7 @@ def main() -> int:
         # Leave headroom when the uv_only banner is drawn at y=0.965, or tight_layout gives
         # the axes the full height and the panel titles land on top of it.
         _bottom = 0.04 if args.color_by in ("substitution", "sigprofiler") else 0
-        _top = 0.94 if (args.color_by == "sigprofiler"
+        _top = 0.94 if (args.color_by == "sigprofiler" and not args.no_banner
                         and args.sig_run.startswith("sigprofilerassignment_uv_only")) else 1
         fig.tight_layout(rect=(0, _bottom, 1, _top))
         out_path = out_dir / f"{cell}_{args.color_by}.png"
