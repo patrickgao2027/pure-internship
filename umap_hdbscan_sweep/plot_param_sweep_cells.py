@@ -235,8 +235,19 @@ def panel(ax, xy, labels, title, colour_by, dominant, point_size, categories=Non
                 ax.scatter(xy[mask, 0], xy[mask, 1], s=point_size, c=colour_of[cat],
                            alpha=0.45, linewidths=0, rasterized=True)
 
-    ax.set_title(f"{title}\n{n_clusters:,} clusters · {100 * noise.mean():.1f}% noise",
-                 fontsize=9)
+    # The cosine panel reports the two numbers the standalone script used to show:
+    # the mean reconstruction quality, and what fraction of points sit in a cluster
+    # SigProfiler actually scored. Noise alone understates the uncovered share,
+    # because a clustered point whose cluster has no stats row is uncovered too.
+    if colour_by == "cosine" and dominant:
+        scored_ids = np.fromiter(dominant.keys(), dtype=labels.dtype)
+        covered = np.isin(labels, scored_ids)
+        mean_cos = float(np.mean(list(dominant.values())))
+        subtitle = (f"{n_clusters:,} clusters · mean {mean_cos:.3f} · "
+                    f"{100 * covered.mean():.1f}% points covered")
+    else:
+        subtitle = f"{n_clusters:,} clusters · {100 * noise.mean():.1f}% noise"
+    ax.set_title(f"{title}\n{subtitle}", fontsize=9)
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_aspect("equal")
