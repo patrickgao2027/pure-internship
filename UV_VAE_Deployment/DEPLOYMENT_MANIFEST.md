@@ -132,7 +132,7 @@ and re-run, not just read.
 | HDBSCAN selection | `hdbscan_scaling_sweep`, `clustering_regime_sweep`, `aggregate_clustering_regime`, `condensed_tree_report`, `cohort_cluster_report` | The fit-size scaling study (500 K → 50 M) and the regime comparison that selected mcs 2500 / ms 1 / ε 0.05. The 50 M cell is where the GPU ran out of memory. |
 | Cluster analysis | `cluster_profiles`, `cluster_quality`, `feature_discrimination`, `clustering_core` | Per-cluster feature profiling and quality scoring. |
 | Row recovery | `recover_source_columns`, `label_dedup_source`, `verify_enriched` | Joining results back to source parquet rows and verifying the join. |
-| Plotting (11) | `plot_*` | Every figure in the analysis: feature atlas, cluster dominance, sample enrichment, cosine similarity, sweep comparison. |
+| Plotting (10) | `plot_*` | Every figure in the analysis: feature atlas, cluster dominance, sample enrichment, cosine similarity, sweep comparison. |
 | Other | `build_stratified_embed`, `make_test_dataset`, `recover_source_columns` | Stratified embedding construction, held-out test set, and recovery of source identity by fingerprint join when it has been lost. |
 | `tests/` | 12 files | Unit tests for the sweep and assignment code. |
 
