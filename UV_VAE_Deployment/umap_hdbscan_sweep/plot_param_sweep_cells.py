@@ -263,7 +263,12 @@ def main() -> int:
                          "signature regardless of true content (see Phase 0)",
                          ha="center", fontsize=8, color="#a04040")
 
-        fig.tight_layout(rect=(0, 0.04 if args.color_by in ("substitution", "sigprofiler") else 0, 1, 1))
+        # Leave headroom when the uv_only banner is drawn at y=0.965, or tight_layout gives
+        # the axes the full height and the panel titles land on top of it.
+        _bottom = 0.04 if args.color_by in ("substitution", "sigprofiler") else 0
+        _top = 0.94 if (args.color_by == "sigprofiler"
+                        and args.sig_run.startswith("sigprofilerassignment_uv_only")) else 1
+        fig.tight_layout(rect=(0, _bottom, 1, _top))
         out_path = out_dir / f"{cell}_{args.color_by}.png"
         fig.savefig(out_path, dpi=args.dpi, bbox_inches="tight")
         plt.close(fig)
