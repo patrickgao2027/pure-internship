@@ -78,7 +78,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--cells", nargs="*", default=None,
                    help="cell labels to plot; default is a spread across the grid")
     p.add_argument("--all", action="store_true", help="plot every finished cell")
-    p.add_argument("--color-by", choices=["cluster", "substitution", "sigprofiler"],
+    p.add_argument("--color-by",
+                   choices=["cluster", "substitution", "sigprofiler", "cosine"],
                    default="cluster")
     p.add_argument("--sig-run", default="sigprofilerassignment_uv_only_grch38_v3.5",
                    help="which SigProfiler output dir to read Activities.txt from "
@@ -143,6 +144,29 @@ def dominant_signature(activities_path: Path) -> tuple[dict[int, str], list[str]
     return out, list(sig_columns)
 
 
+def cluster_cosine(stats_path: Path) -> dict[int, float]:
+    """cluster id -> how well SigProfiler's assigned mixture reproduces its spectrum.
+
+    ``Assignment_Solution_Samples_Stats.txt``: one row per cluster, with a cosine-similarity
+    column giving the agreement between the cluster's observed SBS96 spectrum and the one
+    reconstructed from the signatures SigProfiler assigned it. Low values mark clusters the
+    reference set cannot explain -- on the uv_only reference that is most of them.
+    """
+    import polars as pl
+
+    frame = pl.read_csv(stats_path, separator="\t")
+    column = next((c for c in frame.columns if "cosine" in c.lower()), None)
+    if column is None:
+        raise SystemExit(f"no cosine column in {stats_path} -- header {frame.columns}")
+
+    out: dict[int, float] = {}
+    for name, value in zip(frame[:, 0].to_list(), frame[column].to_list()):
+        match = re.search(r"(\d+)$", str(name))
+        if match is not None and value is not None:
+            out[int(match.group(1))] = float(value)
+    return out
+
+
 def sample_positions(total: int, wanted: int, seed: int) -> np.ndarray:
     if wanted >= total:
         return np.arange(total)
@@ -174,10 +198,31 @@ def panel(ax, xy, labels, title, colour_by, dominant, point_size, categories=Non
 
     n_clusters = int(np.unique(labels[clustered]).size) if clustered.any() else 0
 
+    mappable = None
     if colour_by == "cluster":
         ax.scatter(xy[clustered, 0], xy[clustered, 1], s=point_size,
                    c=(labels[clustered] % 256) / 255.0, cmap="hsv",
                    alpha=0.45, linewidths=0, rasterized=True)
+    elif colour_by == "cosine":
+        # Continuous, so build the per-point value through a lookup table rather than one
+        # scatter per cluster: 175 masked passes over 750k points is slower and no clearer.
+        top = int(labels.max()) + 1 if clustered.any() else 1
+        lut = np.full(max(top, 1), np.nan, dtype=np.float32)
+        for cluster_id, value in dominant.items():
+            if 0 <= cluster_id < len(lut):
+                lut[cluster_id] = value
+        values = np.where(labels >= 0, lut[np.clip(labels, 0, len(lut) - 1)], np.nan)
+        # A cluster SigProfiler produced no stats row for (too small, or absent) is grey,
+        # not zero -- zero would read as "reconstructed terribly" rather than "not scored".
+        unscored = clustered & np.isnan(values)
+        scored = clustered & ~np.isnan(values)
+        if unscored.any():
+            ax.scatter(xy[unscored, 0], xy[unscored, 1], s=point_size, c=NOISE_COLOUR,
+                       alpha=0.45, linewidths=0, rasterized=True)
+        if scored.any():
+            mappable = ax.scatter(xy[scored, 0], xy[scored, 1], s=point_size,
+                                  c=values[scored], cmap="viridis", vmin=0.0, vmax=1.0,
+                                  alpha=0.45, linewidths=0, rasterized=True)
     else:
         # One scatter call per category keeps the legend honest and avoids building a
         # 750k-long RGBA array.
@@ -195,7 +240,7 @@ def panel(ax, xy, labels, title, colour_by, dominant, point_size, categories=Non
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_aspect("equal")
-    return n_clusters
+    return n_clusters, mappable
 
 
 def main() -> int:
@@ -238,6 +283,14 @@ def main() -> int:
                 dominant = dominant_substitution(hits[0])
             categories, colour_of = SUBSTITUTIONS, SUB_COLOURS
 
+        elif args.color_by == "cosine":
+            hits = sorted(cell_dir.glob(
+                f"**/{args.sig_run}/**/Assignment_Solution_Samples_Stats.txt"))
+            if not hits:
+                print(f"  {cell}: no {args.sig_run} Samples_Stats.txt, drawing it grey")
+            else:
+                dominant = cluster_cosine(hits[0])
+
         elif args.color_by == "sigprofiler":
             hits = sorted(cell_dir.glob(f"**/{args.sig_run}/**/Assignment_Solution_Activities.txt"))
             if not hits:
@@ -248,8 +301,12 @@ def main() -> int:
                     s, plt.get_cmap("tab20")(i % 20)) for i, s in enumerate(categories)}
 
         fig, ax = plt.subplots(1, 1, figsize=(8, 8))
-        n = panel(ax, xy, labels, cell, args.color_by, dominant, args.point_size,
-                 categories, colour_of)
+        n, mappable = panel(ax, xy, labels, cell, args.color_by, dominant, args.point_size,
+                            categories, colour_of)
+        if args.color_by == "cosine" and mappable is not None:
+            bar = fig.colorbar(mappable, ax=ax, fraction=0.046, pad=0.03)
+            bar.set_label("SigProfiler reconstruction cosine similarity", fontsize=9)
+            bar.solids.set_alpha(1.0)
 
         if args.color_by in ("substitution", "sigprofiler"):
             handles = [Line2D([], [], marker="o", linestyle="", markersize=7,
