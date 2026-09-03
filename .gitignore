@@ -105,6 +105,7 @@ hdbscan_sweep/images/
 hdbscan_sweep.zip
 per_parquet_reports.tar.gz
 plots/
+learning_and_testing/
 
 # Session / agent context dumps (not project artefacts)
 AGENT_CONTEXT_*.md
