@@ -46,8 +46,6 @@ for d in \
     "$DEST" \
     "$DEST/uv_vae" \
     "$DEST/runs/pure_internship" \
-    "$DEST/experiments/post_pure_analysis/Python Files" \
-    "$DEST/experiments/post_pure_analysis/scripts" \
     "$DEST/experiments/publication_figures/Python Files" \
     "$DEST/experiments/publication_figures/scripts"
 do
