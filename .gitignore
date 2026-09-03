@@ -92,3 +92,30 @@ parquet_files/
 # covers the pickles beside them. Models are distributed with the deployment
 # folder, not through git.
 *.pkl
+
+# ---------------------------------------------------------------------------
+# Sweep outputs, cluster results, and large binary artifacts added 2026-09-03.
+# These accumulate under umap_hdbscan_sweep/ and hdbscan_sweep/ and are too
+# large / regenerable to version.
+# ---------------------------------------------------------------------------
+
+# Full sweep trees
+umap_hdbscan_sweep/
+hdbscan_sweep/
+hdbscan_sweep.zip
+per_parquet_reports.tar.gz
+plots/
+
+# Session / agent context dumps (not project artefacts)
+AGENT_CONTEXT_*.md
+SESSION_SUMMARY_*.md
+
+# Binary / office documents
+*.docx
+*.xlsx
+*.zip
+*.tar.gz
+
+# Log and error files from SLURM/tmux jobs
+*.err
+*.log
