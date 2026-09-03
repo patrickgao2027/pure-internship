@@ -31,13 +31,6 @@ Three panels per cell:
 | **SigProfiler** | Per-cluster `uv_only` signature activities |
 | **Feature atlas** | UMAP coloured by individual input features (one panel per feature) |
 
-## Why mcs=2500, ms=15 was selected
-
-- Larger `min_cluster_size` suppresses fragmentation of noisy regions
-- `min_samples=15` keeps the noise fraction reasonable (~7%) without over-pruning
-- Cosine similarity between clusters is low (clusters are distinct spectra)
-- ARI is stable across seeds at this parameter set
-
 ## Caveats
 
 ### 1. cuML HDBSCAN is not bit-reproducible
@@ -45,29 +38,29 @@ Two fits on identical input with the same seed and parameters give the same clus
 count but move the noise boundary by ~0.3 percentage points. The shipped
 `hdbscan_model.pkl` is the definitive labelling — refitting will not reproduce it exactly.
 
-### 2. cuML model requires a GPU with cuML to unpickle
-`hdbscan_model.pkl` was saved with `cuml.cluster.hdbscan.HDBSCAN`. It cannot be
-loaded on a CPU-only machine. Every other file in the deployment (coordinates, JSON
-reports, SigProfiler outputs) is readable anywhere.
-
-### 3. uv_only, not full COSMIC
-SigProfiler was run against the lab's `uv_only_SBS_GRCh38.tsv` reference, not the
-full COSMIC v3.5 database. Activities and decompositions are only comparable to other
-runs using the same reference.
-
-### 4. Row alignment is fixed to this dedup run
+### 2. Row alignment is fixed to this dedup run
 The five arrays (`vae_latent_16d.npy`, `umap_coords_2d.npy`, `cohort_labels.npy`,
 `cohort_probabilities.npy`, `context.parquet`) are aligned row-for-row to the output
 of the stage-0 dedup. Re-running stage-0 produces a different row order and
 invalidates all five arrays — they must be regenerated together.
 
-### 5. Parametric UMAP, not standard UMAP
+### 3. Parametric UMAP, not standard UMAP
 The 2-D coordinates come from a neural encoder trained to approximate UMAP, not from
 running UMAP directly. This means: (a) new rows project in one forward pass without
 re-fitting, and (b) the embedding is deterministic for new data given the same
 encoder weights, but will differ slightly from a fresh UMAP fit on the same points.
 
-### 6. 5 M row GPU limit for HDBSCAN
-The RTX PRO 5000 Blackwell (47 GB) runs out of memory above ~5 M fit rows for cuML
-HDBSCAN. The 70 M row attempt OOMed after 26 h. The 1 M fit size was chosen to keep
-wall time under 10 min while still capturing the global cluster structure.
+### 4. GPU memory limit for large HDBSCAN fit sizes
+cuML HDBSCAN on the RTX PRO 5000 Blackwell (47 GB) completed fits up to 25 M rows.
+The 70 M row attempt OOMed after 26 h — MST construction at that scale exceeds the
+card's memory. The sweep therefore covers fit sizes up to 25 M; the 1 M fit was
+selected as the production cell to keep per-sample relabelling via `fast_predict`
+fast and memory-bounded.
+
+### 5. DBCV scores are missing for CPU-backend cells at large fit sizes
+DBCV (Density-Based Cluster Validity) requires access to the full distance graph
+from the fit, which the CPU sklearn backend returns but cuML does not expose in the
+same form. Additionally, the CPU refit runs for the 25 M fit-size cells were not
+completed — those cells show blank DBCV entries in the sweep comparison table. Only
+cells where a CPU refit finished have valid DBCV scores. cuML cells at all fit sizes
+report cluster count and noise fraction but not DBCV.
