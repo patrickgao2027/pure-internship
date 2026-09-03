@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HDBSCAN Sweep</title>
+<style>
+/* ── tokens ── */
+:root{
+  --bg:#eef2f5;--panel:#fff;--panel-2:#f4f7fa;--line:#ccd8e0;--line-soft:#e2eaef;
+  --ink:#0d1b24;--ink-2:#3d545f;--ink-3:#6b8391;
+  --accent:#0f7f95;--accent-soft:#d7edf2;--accent-ink:#0a5a6a;
+  --good:#2f7d5c;--good-soft:#dcefe5;
+  --warn:#9c6410;--warn-soft:#f6e9d2;
+  --bad:#a63c31;--bad-soft:#f6dedb;
+  --grid:#dde7ed;
+}
+@media(prefers-color-scheme:dark){:root{
+  --bg:#0a1219;--panel:#111d26;--panel-2:#16242e;--line:#253944;--line-soft:#1c2d37;
+  --ink:#e6eef2;--ink-2:#a7bcc6;--ink-3:#7691a0;
+  --accent:#3fb6ce;--accent-soft:#123039;--accent-ink:#8ad6e6;
+  --good:#5cbf93;--good-soft:#102c22;
+  --warn:#d9a04a;--warn-soft:#2e2412;
+  --bad:#e0796b;--bad-soft:#301a17;
+  --grid:#1e2f39;
+}}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--ink)}
+body{font:13px/1.5 ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;-webkit-font-smoothing:antialiased}
+.sans{font-family:ui-sans-serif,-apple-system,"Segoe UI",sans-serif}
+
+/* ── page 1 ── */
+#pg-select{height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.pg1-header{
+  flex:none;padding:18px 24px 14px;border-bottom:1px solid var(--line);
+  background:var(--panel);display:flex;align-items:baseline;gap:16px;flex-wrap:wrap
+}
+.pg1-title{font-size:20px;font-weight:650;letter-spacing:-.02em}
+.pg1-sub{font-size:12px;color:var(--ink-3)}
+.pg1-legend{
+  margin-left:auto;display:flex;gap:10px;align-items:center;font-size:11px;color:var(--ink-3)
+}
+.leg-dot{width:12px;height:12px;border-radius:2px;flex:none}
+.pg1-scroll{flex:1;overflow:auto}
+#sel-tbl{border-collapse:collapse;width:100%;font-size:12.5px;font-variant-numeric:tabular-nums;min-width:900px}
+#sel-tbl th{
+  position:sticky;top:0;z-index:2;background:var(--panel-2);
+  padding:8px 11px;text-align:right;white-space:nowrap;
+  font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);
+  font-weight:600;border-bottom:2px solid var(--line);cursor:default
+}
+#sel-tbl th:first-child{text-align:left;position:sticky;left:0;z-index:3;border-right:1px solid var(--line)}
+#sel-tbl td{padding:7px 11px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line-soft)}
+#sel-tbl td:first-child{text-align:left;position:sticky;left:0;background:var(--panel);z-index:1;border-right:1px solid var(--line);font-weight:500}
+#sel-tbl tbody tr{cursor:pointer}
+#sel-tbl tbody tr:hover td{opacity:.85;outline:1px solid var(--accent);outline-offset:-1px}
+#sel-tbl tbody tr:hover td:first-child{background:var(--accent-soft);color:var(--accent-ink)}
+#sel-tbl tbody tr.rec .mlabel::before{content:"★ ";color:var(--warn)}
+.selchk{
+  margin-right:8px;vertical-align:middle;cursor:pointer;
+  width:14px;height:14px;accent-color:var(--accent)
+}
+#sel-tbl tbody tr.picked td{box-shadow:inset 0 0 0 9999px rgba(15,127,149,.10)}
+#sel-tbl tbody tr.picked td:first-child{
+  background:var(--accent-soft);color:var(--accent-ink);font-weight:650
+}
+
+/* ── compare bar ── */
+.cmp-bar{
+  flex:none;display:none;align-items:center;gap:14px;
+  padding:11px 24px;border-top:1px solid var(--line);
+  background:var(--panel);box-shadow:0 -3px 14px -8px rgba(0,0,0,.28)
+}
+.cmp-bar.on{display:flex}
+.cmp-count{font-size:12.5px;color:var(--ink-2)}
+.cmp-count b{color:var(--accent);font-size:14px}
+.cmp-names{
+  flex:1;min-width:0;font-size:11px;color:var(--ink-3);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.btn{
+  font:inherit;font-size:12.5px;padding:7px 15px;border-radius:3px;cursor:pointer;
+  border:1px solid var(--line);background:var(--panel-2);color:var(--ink-2)
+}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.btn.primary:hover{filter:brightness(1.1);color:#fff}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn:disabled:hover{border-color:var(--line);color:var(--ink-3)}
+.na-cell{color:var(--ink-3);font-style:italic}
+.group-hdr td{
+  background:var(--panel-2)!important;padding:6px 11px;
+  font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);
+  font-weight:700;border-top:2px solid var(--line);border-bottom:1px solid var(--line)
+}
+
+/* ── page 2 ── */
+#pg-detail{height:100vh;display:none;flex-direction:column;overflow:hidden}
+.pg2-topbar{
+  flex:none;padding:10px 18px;border-bottom:1px solid var(--line);
+  background:var(--panel);display:flex;align-items:center;gap:14px
+}
+#back-btn{
+  font:inherit;font-size:12.5px;background:var(--panel-2);border:1px solid var(--line);
+  border-radius:3px;padding:6px 13px;cursor:pointer;color:var(--ink-2)
+}
+#back-btn:hover{border-color:var(--accent);color:var(--accent)}
+.pg2-label{font-size:14px;font-weight:650;letter-spacing:-.01em}
+.pg2-sublabel{font-size:11px;color:var(--ink-3);margin-top:2px}
+.m-badge{
+  display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:2px;
+  background:var(--warn-soft);color:var(--warn);font-weight:700;margin-left:8px;vertical-align:middle
+}
+.pg2-body{flex:1;overflow:hidden;display:grid;grid-template-columns:280px 1fr}
+
+/* metrics panel */
+.metrics-col{overflow-y:auto;border-right:1px solid var(--line);background:var(--panel);padding:16px 18px}
+.m-section{margin-bottom:20px}
+.m-section-title{
+  font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);
+  font-weight:700;margin-bottom:9px;padding-bottom:6px;border-bottom:1px solid var(--line-soft)
+}
+.m-row{
+  display:flex;justify-content:space-between;align-items:baseline;
+  gap:8px;padding:5px 0;border-bottom:1px solid var(--line-soft)
+}
+.m-row:last-child{border-bottom:0}
+.m-key{font-size:11.5px;color:var(--ink-3)}
+.m-val{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+.m-val.good{color:var(--good)}
+.m-val.bad{color:var(--bad)}
+.m-val.na{color:var(--ink-3);font-weight:400;font-style:italic}
+
+/* image panel */
+.img-col{display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+.img-tabs{flex:none;display:flex;border-bottom:1px solid var(--line);background:var(--panel-2)}
+.itab,.ctab{
+  flex:none;padding:11px 22px;border:0;font:inherit;font-size:12.5px;cursor:pointer;
+  background:transparent;color:var(--ink-3);letter-spacing:.04em;text-transform:uppercase;
+  border-bottom:2px solid transparent;transition:color .1s
+}
+.itab[aria-selected="true"],.ctab[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent);background:var(--panel)}
+.itab:hover:not([aria-selected="true"]),.ctab:hover:not([aria-selected="true"]){color:var(--ink);background:var(--accent-soft)}
+#pg-compare .img-tabs{flex:none;display:flex;border-bottom:1px solid var(--line);background:var(--panel-2)}
+.img-main{flex:1;overflow:hidden;position:relative;display:flex;align-items:center;justify-content:center}
+.img-zoom-wrap{width:100%;height:100%;overflow:auto;display:flex;align-items:flex-start;justify-content:flex-start;cursor:grab;padding:12px}
+.img-zoom-wrap:active{cursor:grabbing}
+#detail-img{display:block;user-select:none}
+.img-cap{
+  flex:none;padding:8px 16px;font-size:11.5px;color:var(--ink-3);
+  border-top:1px solid var(--line-soft);background:var(--panel-2);min-height:32px
+}
+
+/* atlas panel */
+#atlas-panel{display:none;flex-direction:column;overflow:hidden;background:var(--bg)}
+
+/* feature drill-down (full height) */
+.atlas-feat-section{
+  flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0
+}
+/* two-column chip selector */
+.atlas-feat-cols{
+  flex:none;display:grid;grid-template-columns:1fr 1fr;
+  border-bottom:1px solid var(--line);max-height:160px;overflow-y:auto
+}
+.atlas-feat-col{
+  display:flex;flex-direction:column;overflow:hidden;
+  border-right:1px solid var(--line-soft)
+}
+.atlas-feat-col:last-child{border-right:0}
+.atlas-col-hdr{
+  position:sticky;top:0;z-index:1;
+  padding:5px 10px;font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--accent);font-weight:700;background:var(--panel-2);
+  border-bottom:1px solid var(--line-soft)
+}
+.atlas-col-chips{padding:6px 8px;display:flex;flex-wrap:wrap;gap:3px}
+.achip-sep{
+  width:100%;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3);padding:4px 2px 2px;margin-top:2px
+}
+.achip{
+  font:inherit;font-size:11px;padding:3px 8px;border-radius:2px;cursor:pointer;
+  background:var(--panel);border:1px solid var(--line);color:var(--ink-2);white-space:nowrap
+}
+.achip:hover{border-color:var(--accent);color:var(--accent)}
+.achip[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:var(--accent)}
+.atlas-feat-main{
+  flex:1;overflow:hidden;position:relative;
+  display:flex;align-items:center;justify-content:center
+}
+.atlas-zoom-wrap{
+  width:100%;height:100%;overflow:auto;display:flex;
+  align-items:flex-start;justify-content:flex-start;cursor:grab;padding:12px
+}
+.atlas-zoom-wrap:active{cursor:grabbing}
+#atlas-img{display:block;user-select:none}
+.zoom-bar{
+  position:absolute;bottom:10px;right:12px;
+  display:flex;gap:4px;z-index:5
+}
+.zbtn{
+  font:inherit;font-size:13px;font-weight:700;
+  width:30px;height:30px;border-radius:3px;border:1px solid var(--line);
+  background:var(--panel);color:var(--ink-2);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;line-height:1
+}
+.zbtn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.atlas-cap{
+  flex:none;padding:7px 14px;font-size:11px;color:var(--ink-3);
+  border-top:1px solid var(--line-soft);background:var(--panel-2);min-height:28px
+}
+
+/* ── compare page ── */
+#pg-compare{height:100vh;display:none;flex-direction:column;overflow:hidden}
+.cmp-grid{
+  flex:1;overflow-y:auto;padding:14px;
+  display:grid;gap:12px;align-content:start;
+  grid-template-columns:repeat(auto-fit,minmax(340px,1fr))
+}
+.cmp-panel{
+  border:1px solid var(--line);border-radius:3px;background:var(--panel);
+  display:flex;flex-direction:column;overflow:hidden
+}
+.cmp-panel.rec{border-color:var(--warn)}
+.cmp-panel-hdr{
+  flex:none;padding:8px 12px;background:var(--panel-2);
+  border-bottom:1px solid var(--line-soft);
+  display:flex;justify-content:space-between;align-items:baseline;gap:10px
+}
+.cmp-panel-t{font-size:12px;font-weight:650}
+.cmp-panel-s{font-size:10.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap}
+.cmp-panel-img{
+  padding:8px;cursor:zoom-in;background:var(--bg);
+  display:flex;align-items:center;justify-content:center
+}
+.cmp-panel-img img{max-width:100%;height:auto;display:block}
+
+/* ── fullscreen modal ── */
+#modal{
+  position:fixed;inset:0;z-index:100;display:none;
+  background:rgba(6,14,20,.93);flex-direction:column
+}
+#modal.on{display:flex}
+.modal-bar{
+  flex:none;display:flex;align-items:center;gap:12px;padding:10px 16px;
+  background:rgba(0,0,0,.35);color:#e6eef2
+}
+.modal-title{font-size:13px;font-weight:650;flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.modal-bar .zbtn{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.25);color:#e6eef2}
+.modal-bar .zbtn:hover{background:rgba(255,255,255,.22);color:#fff;border-color:#fff}
+.modal-body{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;
+  padding:12px;cursor:grab}
+.modal-body:active{cursor:grabbing}
+#modal-img{display:block;user-select:none}
+
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- PAGE 1 -->
+<div id="pg-select">
+  <div class="pg1-header">
+    <div>
+      <div class="pg1-title sans">HDBSCAN Parameter Sweep</div>
+      <div class="pg1-sub">28 cells · 157.5 M reads · click any row to inspect its plots and metrics</div>
+    </div>
+    <div class="pg1-legend">
+      <span class="leg-dot" style="background:#7ecfa0;border:1px solid #4caf80"></span>better
+      <span class="leg-dot" style="background:#f5a59e;border:1px solid #e0706a"></span>worse
+      <span style="color:var(--warn)">★</span>&nbsp;recommended
+    </div>
+  </div>
+  <div class="pg1-scroll">
+    <table id="sel-tbl"><thead id="sel-thead"></thead><tbody id="sel-tbody"></tbody></table>
+  </div>
+  <div class="cmp-bar" id="cmp-bar">
+    <span class="cmp-count"><b id="cmp-n">0</b> selected</span>
+    <span class="cmp-names" id="cmp-names"></span>
+    <button class="btn" id="cmp-clear" type="button">Clear</button>
+    <button class="btn primary" id="cmp-go" type="button">Compare plots →</button>
+  </div>
+</div>
+
+<!-- PAGE 3: compare -->
+<div id="pg-compare">
+  <div class="pg2-topbar">
+    <button id="cmp-back" type="button" class="btn">← All models</button>
+    <div>
+      <div class="pg2-label sans">Compare models</div>
+      <div class="pg2-sublabel" id="cmp-sub"></div>
+    </div>
+  </div>
+  <div class="img-tabs">
+    <button class="ctab" aria-selected="true"  data-ctab="subst">Substitution</button>
+    <button class="ctab" aria-selected="false" data-ctab="sigp">UMAP + SigProfiler</button>
+    <button class="ctab" aria-selected="false" data-ctab="cosine">Cosine Similarity</button>
+    <button class="ctab" aria-selected="false" data-ctab="cluster">Clusters</button>
+  </div>
+  <div class="cmp-grid" id="cmp-grid"></div>
+</div>
+
+<!-- fullscreen image modal -->
+<div id="modal">
+  <div class="modal-bar">
+    <div class="modal-title" id="modal-title"></div>
+    <button class="zbtn" id="modal-zin"  title="Zoom in">+</button>
+    <button class="zbtn" id="modal-zout" title="Zoom out">−</button>
+    <button class="zbtn" id="modal-zrst" title="Reset zoom" style="font-size:11px">⊙</button>
+    <button class="zbtn" id="modal-close" title="Close (Esc)">✕</button>
+  </div>
+  <div class="modal-body" id="modal-body"><img id="modal-img" src="" alt=""></div>
+</div>
+
+<!-- PAGE 2 -->
+<div id="pg-detail">
+  <div class="pg2-topbar">
+    <button id="back-btn" type="button">← All models</button>
+    <div>
+      <div class="pg2-label sans" id="detail-label"></div>
+      <div class="pg2-sublabel" id="detail-sublabel"></div>
+    </div>
+  </div>
+  <div class="pg2-body">
+    <div class="metrics-col" id="metrics-col"></div>
+    <div class="img-col" id="img-col">
+      <div class="img-tabs">
+        <button class="itab" aria-selected="true"  data-itab="subst">Substitution</button>
+        <button class="itab" aria-selected="false" data-itab="sigp">UMAP + SigProfiler</button>
+        <button class="itab" aria-selected="false" data-itab="cosine">Cosine Similarity</button>
+        <button class="itab" aria-selected="false" data-itab="cluster">Clusters</button>
+        <button class="itab" aria-selected="false" data-itab="atlas">Feature Atlas</button>
+      </div>
+      <div class="img-main">
+        <div class="img-zoom-wrap" id="cell-zoom-wrap"><img id="detail-img" src="" alt=""></div>
+        <div class="zoom-bar">
+          <button class="zbtn" id="cell-zoom-in"  title="Zoom in">+</button>
+          <button class="zbtn" id="cell-zoom-out" title="Zoom out">−</button>
+          <button class="zbtn" id="cell-zoom-rst" title="Reset zoom" style="font-size:11px">⊙</button>
+        </div>
+      </div>
+      <div class="img-cap" id="img-cap"></div>
+    </div>
+    <div id="atlas-panel">
+      <div class="img-tabs" style="border-bottom:1px solid var(--line)">
+        <button class="itab" aria-selected="false" data-itab="subst">Substitution</button>
+        <button class="itab" aria-selected="false" data-itab="sigp">UMAP + SigProfiler</button>
+        <button class="itab" aria-selected="false" data-itab="cosine">Cosine Similarity</button>
+        <button class="itab" aria-selected="false" data-itab="cluster">Clusters</button>
+        <button class="itab" aria-selected="true"  data-itab="atlas">Feature Atlas</button>
+      </div>
+      <div class="atlas-feat-section">
+        <div class="atlas-feat-cols">
+          <div class="atlas-feat-col">
+            <div class="atlas-col-hdr">Categorical</div>
+            <div class="atlas-col-chips" id="atlas-cat-chips"></div>
+          </div>
+          <div class="atlas-feat-col">
+            <div class="atlas-col-hdr">Numeric</div>
+            <div class="atlas-col-chips" id="atlas-num-chips"></div>
+          </div>
+        </div>
+        <div class="atlas-feat-main">
+          <div class="atlas-zoom-wrap" id="atlas-zoom-wrap">
+            <img id="atlas-img" src="" alt="" style="display:none">
+          </div>
+          <div class="zoom-bar">
+            <button class="zbtn" id="atlas-zoom-in"  title="Zoom in">+</button>
+            <button class="zbtn" id="atlas-zoom-out" title="Zoom out">−</button>
+            <button class="zbtn" id="atlas-zoom-rst" title="Reset zoom" style="font-size:11px">⊙</button>
+          </div>
+        </div>
+        <div class="atlas-cap" id="atlas-cap">Select a feature above to view its UMAP</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const DATA = {"cells": [{"label": "fit500000_mcs250_ms5_eom", "fit_rows": 500000.0, "mcs": 250.0, "ms": 5.0, "n_clusters": 560.0, "noise_pct": 12.42, "dbcv": 0.1890586063029621, "connectivity": 0.999, "mean_prob": 0.758, "frac_prob_08": 0.655, "persistence_med": 1.0, "rel_validity": 0.2935, "neg_dbcv_frac": 0.3276, "cos_mean": 0.2689, "cos_wtmean": 0.2629, "pct_mut_cos08": 2.2, "top_chan_med": 0.829, "frac_topchan_05": 0.841, "l1_resid": 173.82, "fit_time": 6.0, "label_time": 54.0, "cpu": {"label": "fit500000_mcs250_ms5_eom", "n_clusters": 560.0, "rel_validity": 0.2935, "dbcv": 0.1890586063029621, "frac_neg_dbcv_clusters": 0.3232, "frac_pts_neg_dbcv": 0.3276, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit500000_mcs250_ms15_eom", "fit_rows": 500000.0, "mcs": 250.0, "ms": 15.0, "n_clusters": 518.0, "noise_pct": 10.66, "dbcv": 0.3286192958739054, "connectivity": 1.0, "mean_prob": 0.759, "frac_prob_08": 0.607, "persistence_med": 1.0, "rel_validity": 0.3176, "neg_dbcv_frac": 0.1575, "cos_mean": 0.2771, "cos_wtmean": 0.2628, "pct_mut_cos08": 2.0, "top_chan_med": 0.827, "frac_topchan_05": 0.844, "l1_resid": 173.0, "fit_time": 5.4, "label_time": 100.0, "cpu": {"label": "fit500000_mcs250_ms15_eom", "n_clusters": 518.0, "rel_validity": 0.3176, "dbcv": 0.3286192958739054, "frac_neg_dbcv_clusters": 0.1274, "frac_pts_neg_dbcv": 0.1575, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.2254, "outlier_p99": 1.0}}, {"label": "fit500000_mcs500_ms5_eom", "fit_rows": 500000.0, "mcs": 500.0, "ms": 5.0, "n_clusters": 363.0, "noise_pct": 9.12, "dbcv": 0.243984594501286, "connectivity": 1.0, "mean_prob": 0.782, "frac_prob_08": 0.676, "persistence_med": 1.0, "rel_validity": 0.2994, "neg_dbcv_frac": 0.2533, "cos_mean": 0.27, "cos_wtmean": 0.2625, "pct_mut_cos08": 2.0, "top_chan_med": 0.752, "frac_topchan_05": 0.793, "l1_resid": 172.55, "fit_time": 5.8, "label_time": 53.1, "cpu": {"label": "fit500000_mcs500_ms5_eom", "n_clusters": 363.0, "rel_validity": 0.2994, "dbcv": 0.243984594501286, "frac_neg_dbcv_clusters": 0.2424, "frac_pts_neg_dbcv": 0.2533, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit500000_mcs500_ms15_eom", "fit_rows": 500000.0, "mcs": 500.0, "ms": 15.0, "n_clusters": 348.0, "noise_pct": 8.15, "dbcv": 0.3364573014347578, "connectivity": 1.0, "mean_prob": 0.792, "frac_prob_08": 0.65, "persistence_med": 1.0, "rel_validity": 0.2963, "neg_dbcv_frac": 0.1791, "cos_mean": 0.279, "cos_wtmean": 0.2646, "pct_mut_cos08": 2.0, "top_chan_med": 0.757, "frac_topchan_05": 0.799, "l1_resid": 171.87, "fit_time": 5.3, "label_time": 99.4, "cpu": {"label": "fit500000_mcs500_ms15_eom", "n_clusters": 348.0, "rel_validity": 0.2963, "dbcv": 0.3364573014347578, "frac_neg_dbcv_clusters": 0.1523, "frac_pts_neg_dbcv": 0.1791, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0826, "outlier_p99": 1.0}}, {"label": "fit500000_mcs1000_ms5_eom", "fit_rows": 500000.0, "mcs": 1000.0, "ms": 5.0, "n_clusters": 220.0, "noise_pct": 7.9, "dbcv": 0.3994506718435596, "connectivity": 1.0, "mean_prob": 0.826, "frac_prob_08": 0.713, "persistence_med": 1.0, "rel_validity": 0.3348, "neg_dbcv_frac": 0.099, "cos_mean": 0.2787, "cos_wtmean": 0.2708, "pct_mut_cos08": 1.7, "top_chan_med": 0.675, "frac_topchan_05": 0.727, "l1_resid": 170.62, "fit_time": 5.9, "label_time": 53.0, "cpu": {"label": "fit500000_mcs1000_ms5_eom", "n_clusters": 220.0, "rel_validity": 0.3348, "dbcv": 0.3994506718435596, "frac_neg_dbcv_clusters": 0.1136, "frac_pts_neg_dbcv": 0.099, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit500000_mcs1000_ms15_eom", "fit_rows": 500000.0, "mcs": 1000.0, "ms": 15.0, "n_clusters": 215.0, "noise_pct": 6.62, "dbcv": 0.4156547947443766, "connectivity": 1.0, "mean_prob": 0.827, "frac_prob_08": 0.703, "persistence_med": 1.0, "rel_validity": 0.2945, "neg_dbcv_frac": 0.1254, "cos_mean": 0.2757, "cos_wtmean": 0.2718, "pct_mut_cos08": 1.6, "top_chan_med": 0.672, "frac_topchan_05": 0.712, "l1_resid": 170.72, "fit_time": 5.3, "label_time": 99.5, "cpu": {"label": "fit500000_mcs1000_ms15_eom", "n_clusters": 215.0, "rel_validity": 0.2945, "dbcv": 0.4156547947443766, "frac_neg_dbcv_clusters": 0.1163, "frac_pts_neg_dbcv": 0.1254, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit500000_mcs2500_ms5_eom", "fit_rows": 500000.0, "mcs": 2500.0, "ms": 5.0, "n_clusters": 88.0, "noise_pct": 12.51, "dbcv": 0.4451308518751905, "connectivity": 1.0, "mean_prob": 0.82, "frac_prob_08": 0.704, "persistence_med": 0.2149, "rel_validity": 0.3457, "neg_dbcv_frac": 0.1309, "cos_mean": 0.2613, "cos_wtmean": 0.2665, "pct_mut_cos08": 0.9, "top_chan_med": 0.57, "frac_topchan_05": 0.614, "l1_resid": 170.38, "fit_time": 5.8, "label_time": 53.1, "cpu": {"label": "fit500000_mcs2500_ms5_eom", "n_clusters": 88.0, "rel_validity": 0.3457, "dbcv": 0.4451308518751905, "frac_neg_dbcv_clusters": 0.1136, "frac_pts_neg_dbcv": 0.1309, "persist_min": 0.0035, "persist_med": 0.1949, "persist_max": 0.9375, "frac_persist_1": 0.0, "outlier_p50": 0.0, "outlier_p99": 0.9788}}, {"label": "fit500000_mcs2500_ms15_eom", "fit_rows": 500000.0, "mcs": 2500.0, "ms": 15.0, "n_clusters": 89.0, "noise_pct": 7.27, "dbcv": 0.4407456518740483, "connectivity": 1.0, "mean_prob": 0.845, "frac_prob_08": 0.735, "persistence_med": 0.2252, "rel_validity": 0.3462, "neg_dbcv_frac": 0.1006, "cos_mean": 0.2749, "cos_wtmean": 0.2844, "pct_mut_cos08": 0.0, "top_chan_med": 0.549, "frac_topchan_05": 0.629, "l1_resid": 168.39, "fit_time": 5.3, "label_time": 99.5, "cpu": {"label": "fit500000_mcs2500_ms15_eom", "n_clusters": 89.0, "rel_validity": 0.3462, "dbcv": 0.4407456518740483, "frac_neg_dbcv_clusters": 0.0787, "frac_pts_neg_dbcv": 0.1006, "persist_min": 0.0104, "persist_med": 0.2004, "persist_max": 0.9256, "frac_persist_1": 0.0, "outlier_p50": 0.0, "outlier_p99": 0.9495}}, {"label": "fit1000000_mcs250_ms5_eom", "fit_rows": 1000000.0, "mcs": 250.0, "ms": 5.0, "n_clusters": 814.0, "noise_pct": 16.83, "dbcv": 0.08810722948745413, "connectivity": 0.998, "mean_prob": 0.75, "frac_prob_08": 0.697, "persistence_med": 1.0, "rel_validity": 0.2595, "neg_dbcv_frac": 0.4178, "cos_mean": 0.256, "cos_wtmean": 0.2579, "pct_mut_cos08": 2.1, "top_chan_med": 0.894, "frac_topchan_05": 0.861, "l1_resid": 175.5, "fit_time": 20.3, "label_time": 67.9, "cpu": {"label": "fit1000000_mcs250_ms5_eom", "n_clusters": 814.0, "rel_validity": 0.2595, "dbcv": 0.08810722948745413, "frac_neg_dbcv_clusters": 0.4091, "frac_pts_neg_dbcv": 0.4178, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit1000000_mcs250_ms15_eom", "fit_rows": 1000000.0, "mcs": 250.0, "ms": 15.0, "n_clusters": 735.0, "noise_pct": 15.88, "dbcv": 0.2235896633035546, "connectivity": 0.999, "mean_prob": 0.724, "frac_prob_08": 0.608, "persistence_med": 1.0, "rel_validity": 0.3223, "neg_dbcv_frac": 0.2792, "cos_mean": 0.2579, "cos_wtmean": 0.2626, "pct_mut_cos08": 2.5, "top_chan_med": 0.897, "frac_topchan_05": 0.879, "l1_resid": 175.45, "fit_time": 18.8, "label_time": 123.0, "cpu": {"label": "fit1000000_mcs250_ms15_eom", "n_clusters": 735.0, "rel_validity": 0.3223, "dbcv": 0.2235896633035546, "frac_neg_dbcv_clusters": 0.2558, "frac_pts_neg_dbcv": 0.2792, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.2929, "outlier_p99": 1.0}}, {"label": "fit1000000_mcs500_ms5_eom", "fit_rows": 1000000.0, "mcs": 500.0, "ms": 5.0, "n_clusters": 584.0, "noise_pct": 12.9, "dbcv": 0.1620538730942568, "connectivity": 0.999, "mean_prob": 0.744, "frac_prob_08": 0.682, "persistence_med": 1.0, "rel_validity": 0.2768, "neg_dbcv_frac": 0.3336, "cos_mean": 0.2684, "cos_wtmean": 0.2619, "pct_mut_cos08": 2.4, "top_chan_med": 0.844, "frac_topchan_05": 0.846, "l1_resid": 173.93, "fit_time": 20.3, "label_time": 67.0, "cpu": {"label": "fit1000000_mcs500_ms5_eom", "n_clusters": 584.0, "rel_validity": 0.2768, "dbcv": 0.1620538730942568, "frac_neg_dbcv_clusters": 0.3459, "frac_pts_neg_dbcv": 0.3336, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit1000000_mcs500_ms15_eom", "fit_rows": 1000000.0, "mcs": 500.0, "ms": 15.0, "n_clusters": 534.0, "noise_pct": 10.89, "dbcv": 0.2974854901959106, "connectivity": 1.0, "mean_prob": 0.736, "frac_prob_08": 0.613, "persistence_med": 1.0, "rel_validity": 0.3303, "neg_dbcv_frac": 0.2098, "cos_mean": 0.2752, "cos_wtmean": 0.2618, "pct_mut_cos08": 2.0, "top_chan_med": 0.826, "frac_topchan_05": 0.843, "l1_resid": 173.26, "fit_time": 18.8, "label_time": 122.9, "cpu": {"label": "fit1000000_mcs500_ms15_eom", "n_clusters": 534.0, "rel_validity": 0.3303, "dbcv": 0.2974854901959106, "frac_neg_dbcv_clusters": 0.1742, "frac_pts_neg_dbcv": 0.2098, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.1835, "outlier_p99": 1.0}}, {"label": "fit1000000_mcs1000_ms5_eom", "fit_rows": 1000000.0, "mcs": 1000.0, "ms": 5.0, "n_clusters": 375.0, "noise_pct": 10.69, "dbcv": 0.2966841395528104, "connectivity": 1.0, "mean_prob": 0.787, "frac_prob_08": 0.699, "persistence_med": 1.0, "rel_validity": 0.2845, "neg_dbcv_frac": 0.2095, "cos_mean": 0.2725, "cos_wtmean": 0.2629, "pct_mut_cos08": 2.0, "top_chan_med": 0.757, "frac_topchan_05": 0.811, "l1_resid": 172.38, "fit_time": 20.2, "label_time": 66.6, "cpu": {"label": "fit1000000_mcs1000_ms5_eom", "n_clusters": 375.0, "rel_validity": 0.2845, "dbcv": 0.2966841395528104, "frac_neg_dbcv_clusters": 0.2107, "frac_pts_neg_dbcv": 0.2095, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit1000000_mcs1000_ms15_eom", "fit_rows": 1000000.0, "mcs": 1000.0, "ms": 15.0, "n_clusters": 357.0, "noise_pct": 8.31, "dbcv": 0.3473321504815036, "connectivity": 1.0, "mean_prob": 0.785, "frac_prob_08": 0.661, "persistence_med": 1.0, "rel_validity": 0.3048, "neg_dbcv_frac": 0.1624, "cos_mean": 0.27, "cos_wtmean": 0.2657, "pct_mut_cos08": 1.9, "top_chan_med": 0.744, "frac_topchan_05": 0.798, "l1_resid": 172.64, "fit_time": 18.8, "label_time": 122.6, "cpu": {"label": "fit1000000_mcs1000_ms15_eom", "n_clusters": 357.0, "rel_validity": 0.3048, "dbcv": 0.3473321504815036, "frac_neg_dbcv_clusters": 0.1485, "frac_pts_neg_dbcv": 0.1624, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit1000000_mcs2500_ms5_eom", "fit_rows": 1000000.0, "mcs": 2500.0, "ms": 5.0, "n_clusters": 176.0, "noise_pct": 8.24, "dbcv": 0.3945264946220602, "connectivity": 1.0, "mean_prob": 0.816, "frac_prob_08": 0.722, "persistence_med": 1.0, "rel_validity": 0.3124, "neg_dbcv_frac": 0.161, "cos_mean": 0.2806, "cos_wtmean": 0.2756, "pct_mut_cos08": 1.4, "top_chan_med": 0.659, "frac_topchan_05": 0.67, "l1_resid": 169.72, "fit_time": 20.3, "label_time": 66.2, "cpu": {"label": "fit1000000_mcs2500_ms5_eom", "n_clusters": 176.0, "rel_validity": 0.3124, "dbcv": 0.3945264946220602, "frac_neg_dbcv_clusters": 0.1534, "frac_pts_neg_dbcv": 0.161, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit1000000_mcs2500_ms15_eom", "fit_rows": 1000000.0, "mcs": 2500.0, "ms": 15.0, "n_clusters": 175.0, "noise_pct": 7.36, "dbcv": 0.4313096992904942, "connectivity": 1.0, "mean_prob": 0.828, "frac_prob_08": 0.722, "persistence_med": 1.0, "rel_validity": 0.3174, "neg_dbcv_frac": 0.1077, "cos_mean": 0.2804, "cos_wtmean": 0.2774, "pct_mut_cos08": 1.4, "top_chan_med": 0.653, "frac_topchan_05": 0.663, "l1_resid": 169.73, "fit_time": 18.8, "label_time": 122.4, "cpu": {"label": "fit1000000_mcs2500_ms15_eom", "n_clusters": 175.0, "rel_validity": 0.3174, "dbcv": 0.4313096992904942, "frac_neg_dbcv_clusters": 0.0914, "frac_pts_neg_dbcv": 0.1077, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit5000000_mcs250_ms5_eom", "fit_rows": 5000000.0, "mcs": 250.0, "ms": 5.0, "n_clusters": 1096.0, "noise_pct": 11.67, "dbcv": 0.01607309514655881, "connectivity": 0.998, "mean_prob": 0.862, "frac_prob_08": 0.853, "persistence_med": 1.0, "rel_validity": 0.2142, "neg_dbcv_frac": 0.5229, "cos_mean": 0.2569, "cos_wtmean": 0.2567, "pct_mut_cos08": 2.2, "top_chan_med": 0.873, "frac_topchan_05": 0.854, "l1_resid": 175.49, "fit_time": 458.3, "label_time": 148.1, "cpu": {"label": "fit5000000_mcs250_ms5_eom", "n_clusters": 1096.0, "rel_validity": 0.2142, "dbcv": 0.01607309514655881, "frac_neg_dbcv_clusters": 0.5547, "frac_pts_neg_dbcv": 0.5229, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit5000000_mcs250_ms15_eom", "fit_rows": 5000000.0, "mcs": 250.0, "ms": 15.0, "n_clusters": 1330.0, "noise_pct": 19.43, "dbcv": 0.001472369268413223, "connectivity": 0.998, "mean_prob": 0.768, "frac_prob_08": 0.742, "persistence_med": 1.0, "rel_validity": 0.197, "neg_dbcv_frac": 0.5117, "cos_mean": 0.2443, "cos_wtmean": 0.2611, "pct_mut_cos08": 2.6, "top_chan_med": 0.917, "frac_topchan_05": 0.876, "l1_resid": 176.92, "fit_time": 460.4, "label_time": 257.2, "cpu": {"label": "fit5000000_mcs250_ms15_eom", "n_clusters": 1330.0, "rel_validity": 0.197, "dbcv": 0.001472369268413223, "frac_neg_dbcv_clusters": 0.4857, "frac_pts_neg_dbcv": 0.5117, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit5000000_mcs500_ms5_eom", "fit_rows": 5000000.0, "mcs": 500.0, "ms": 5.0, "n_clusters": 856.0, "noise_pct": 10.63, "dbcv": 0.06872154786232307, "connectivity": 0.999, "mean_prob": 0.855, "frac_prob_08": 0.845, "persistence_med": 1.0, "rel_validity": 0.2347, "neg_dbcv_frac": 0.4645, "cos_mean": 0.2628, "cos_wtmean": 0.2576, "pct_mut_cos08": 2.3, "top_chan_med": 0.864, "frac_topchan_05": 0.848, "l1_resid": 174.87, "fit_time": 458.0, "label_time": 145.9, "cpu": {"label": "fit5000000_mcs500_ms5_eom", "n_clusters": 856.0, "rel_validity": 0.2347, "dbcv": 0.06872154786232307, "frac_neg_dbcv_clusters": 0.4755, "frac_pts_neg_dbcv": 0.4645, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit5000000_mcs500_ms15_eom", "fit_rows": 5000000.0, "mcs": 500.0, "ms": 15.0, "n_clusters": 1008.0, "noise_pct": 17.11, "dbcv": 0.0547015692030264, "connectivity": 0.999, "mean_prob": 0.762, "frac_prob_08": 0.731, "persistence_med": 1.0, "rel_validity": 0.2466, "neg_dbcv_frac": 0.4598, "cos_mean": 0.2548, "cos_wtmean": 0.2609, "pct_mut_cos08": 2.6, "top_chan_med": 0.918, "frac_topchan_05": 0.873, "l1_resid": 175.88, "fit_time": 460.5, "label_time": 257.0, "cpu": {"label": "fit5000000_mcs500_ms15_eom", "n_clusters": 1008.0, "rel_validity": 0.2466, "dbcv": 0.0547015692030264, "frac_neg_dbcv_clusters": 0.4464, "frac_pts_neg_dbcv": 0.4598, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit5000000_mcs1000_ms5_eom", "fit_rows": 5000000.0, "mcs": 1000.0, "ms": 5.0, "n_clusters": 692.0, "noise_pct": 9.32, "dbcv": 0.1131530869478111, "connectivity": 0.999, "mean_prob": 0.842, "frac_prob_08": 0.833, "persistence_med": 1.0, "rel_validity": 0.2518, "neg_dbcv_frac": 0.4077, "cos_mean": 0.2631, "cos_wtmean": 0.2588, "pct_mut_cos08": 2.3, "top_chan_med": 0.868, "frac_topchan_05": 0.847, "l1_resid": 174.71, "fit_time": 457.3, "label_time": 128.6, "cpu": {"label": "fit5000000_mcs1000_ms5_eom", "n_clusters": 692.0, "rel_validity": 0.2518, "dbcv": 0.1131530869478111, "frac_neg_dbcv_clusters": 0.4292, "frac_pts_neg_dbcv": 0.4077, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit5000000_mcs1000_ms15_eom", "fit_rows": 5000000.0, "mcs": 1000.0, "ms": 15.0, "n_clusters": 784.0, "noise_pct": 14.39, "dbcv": 0.1260209034504625, "connectivity": 0.999, "mean_prob": 0.759, "frac_prob_08": 0.726, "persistence_med": 1.0, "rel_validity": 0.2453, "neg_dbcv_frac": 0.3972, "cos_mean": 0.2599, "cos_wtmean": 0.2604, "pct_mut_cos08": 2.6, "top_chan_med": 0.908, "frac_topchan_05": 0.867, "l1_resid": 175.1, "fit_time": 459.8, "label_time": 256.7, "cpu": {"label": "fit5000000_mcs1000_ms15_eom", "n_clusters": 784.0, "rel_validity": 0.2453, "dbcv": 0.1260209034504625, "frac_neg_dbcv_clusters": 0.361, "frac_pts_neg_dbcv": 0.3972, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit5000000_mcs2500_ms5_eom", "fit_rows": 5000000.0, "mcs": 2500.0, "ms": 5.0, "n_clusters": 513.0, "noise_pct": 8.77, "dbcv": 0.2000516839518017, "connectivity": 1.0, "mean_prob": 0.839, "frac_prob_08": 0.826, "persistence_med": 1.0, "rel_validity": 0.2624, "neg_dbcv_frac": 0.32, "cos_mean": 0.2798, "cos_wtmean": 0.2607, "pct_mut_cos08": 2.3, "top_chan_med": 0.812, "frac_topchan_05": 0.836, "l1_resid": 172.78, "fit_time": 457.1, "label_time": 127.0, "cpu": {"label": "fit5000000_mcs2500_ms5_eom", "n_clusters": 513.0, "rel_validity": 0.2624, "dbcv": 0.2000516839518017, "frac_neg_dbcv_clusters": 0.3099, "frac_pts_neg_dbcv": 0.32, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit5000000_mcs2500_ms15_eom", "fit_rows": 5000000.0, "mcs": 2500.0, "ms": 15.0, "n_clusters": 548.0, "noise_pct": 11.26, "dbcv": 0.1973877711147611, "connectivity": 1.0, "mean_prob": 0.771, "frac_prob_08": 0.732, "persistence_med": 1.0, "rel_validity": 0.3044, "neg_dbcv_frac": 0.3093, "cos_mean": 0.275, "cos_wtmean": 0.2605, "pct_mut_cos08": 2.1, "top_chan_med": 0.826, "frac_topchan_05": 0.847, "l1_resid": 173.25, "fit_time": 459.8, "label_time": 255.6, "cpu": {"label": "fit5000000_mcs2500_ms15_eom", "n_clusters": 548.0, "rel_validity": 0.3044, "dbcv": 0.1973877711147611, "frac_neg_dbcv_clusters": 0.2956, "frac_pts_neg_dbcv": 0.3093, "persist_min": 1.0, "persist_med": 1.0, "persist_max": 1.0, "frac_persist_1": 1.0, "outlier_p50": 0.0, "outlier_p99": 1.0}}, {"label": "fit25000000_mcs250_ms5_eom", "fit_rows": 25000000.0, "mcs": 250.0, "ms": 5.0, "n_clusters": 872.0, "noise_pct": 3.97, "dbcv": 0.05959473107686527, "connectivity": 1.0, "mean_prob": 0.955, "frac_prob_08": 0.955, "persistence_med": 1.0, "rel_validity": null, "neg_dbcv_frac": null, "cos_mean": 0.3172, "cos_wtmean": 0.2625, "pct_mut_cos08": 1.3, "top_chan_med": 0.777, "frac_topchan_05": 0.804, "l1_resid": 169.81, "fit_time": 11651.7, "label_time": 406.4, "cpu": null}, {"label": "fit25000000_mcs500_ms5_eom", "fit_rows": 25000000.0, "mcs": 500.0, "ms": 5.0, "n_clusters": 634.0, "noise_pct": 3.64, "dbcv": 0.1589336509775593, "connectivity": 1.0, "mean_prob": 0.951, "frac_prob_08": 0.95, "persistence_med": 1.0, "rel_validity": null, "neg_dbcv_frac": null, "cos_mean": 0.305, "cos_wtmean": 0.2629, "pct_mut_cos08": 1.4, "top_chan_med": 0.808, "frac_topchan_05": 0.826, "l1_resid": 170.77, "fit_time": 11619.5, "label_time": 403.1, "cpu": null}, {"label": "fit25000000_mcs1000_ms5_eom", "fit_rows": 25000000.0, "mcs": 1000.0, "ms": 5.0, "n_clusters": 517.0, "noise_pct": 3.38, "dbcv": 0.1862592371131105, "connectivity": 1.0, "mean_prob": 0.948, "frac_prob_08": 0.947, "persistence_med": 1.0, "rel_validity": null, "neg_dbcv_frac": null, "cos_mean": 0.2996, "cos_wtmean": 0.2636, "pct_mut_cos08": 1.4, "top_chan_med": 0.809, "frac_topchan_05": 0.822, "l1_resid": 170.83, "fit_time": 11638.1, "label_time": 411.6, "cpu": null}, {"label": "fit25000000_mcs2500_ms5_eom", "fit_rows": 25000000.0, "mcs": 2500.0, "ms": 5.0, "n_clusters": 441.0, "noise_pct": 3.19, "dbcv": 0.2265877478074926, "connectivity": 1.0, "mean_prob": 0.946, "frac_prob_08": 0.945, "persistence_med": 1.0, "rel_validity": null, "neg_dbcv_frac": null, "cos_mean": 0.3031, "cos_wtmean": 0.2646, "pct_mut_cos08": 1.3, "top_chan_med": 0.785, "frac_topchan_05": 0.819, "l1_resid": 170.56, "fit_time": 11659.6, "label_time": 399.4, "cpu": null}], "stats": {"noise_pct": {"n": 28, "min": 3.19, "max": 19.43, "distinct": 28, "spread": 6.09, "rho": 0.516}, "dbcv": {"n": 28, "min": 0.001472369268413223, "max": 0.4451308518751905, "distinct": 28, "spread": 302.32, "rho": -0.956}, "connectivity": {"n": 28, "min": 0.998, "max": 1.0, "distinct": 3, "spread": 1.0, "rho": -0.492}, "mean_prob": {"n": 28, "min": 0.724, "max": 0.955, "distinct": 27, "spread": 1.32, "rho": -0.147}, "frac_prob_08": {"n": 28, "min": 0.607, "max": 0.955, "distinct": 27, "spread": 1.57, "rho": 0.292}, "persistence_med": {"n": 28, "min": 0.2149, "max": 1.0, "distinct": 3, "spread": 4.65, "rho": 0.449}, "rel_validity": {"n": 24, "min": 0.197, "max": 0.3462, "distinct": 24, "spread": 1.76, "rho": -0.775}, "neg_dbcv_frac": {"n": 24, "min": 0.099, "max": 0.5229, "distinct": 24, "spread": 5.28, "rho": 0.932}, "cos_mean": {"n": 28, "min": 0.2443, "max": 0.3172, "distinct": 27, "spread": 1.3, "rho": -0.481}, "cos_wtmean": {"n": 28, "min": 0.2567, "max": 0.2844, "distinct": 24, "spread": 1.11, "rho": -0.83}, "pct_mut_cos08": {"n": 28, "min": 0.0, "max": 2.6, "distinct": 14, "spread": null, "rho": 0.677}, "top_chan_med": {"n": 28, "min": 0.549, "max": 0.918, "distinct": 26, "spread": 1.67, "rho": 0.906}, "frac_topchan_05": {"n": 28, "min": 0.614, "max": 0.879, "distinct": 27, "spread": 1.43, "rho": 0.892}, "l1_resid": {"n": 28, "min": 168.39, "max": 176.92, "distinct": 28, "spread": 1.05, "rho": 0.798}}, "glossary": {"label": "Cell identifier: fit{rows}_mcs{min_cluster_size}_ms{min_samples}_eom", "fit_rows": "Number of UMAP points used to fit HDBSCAN (subsample of full 157.5M cohort)", "mcs": "min_cluster_size: minimum points for a group to be considered a cluster", "ms": "min_samples: controls conservatism; higher = more noise, fewer clusters", "n_clusters": "Number of clusters found by HDBSCAN (excludes noise)", "noise_pct": "Fraction of cohort reads assigned to cluster \u22121 (noise), expressed as %", "dbcv": "Density-Based Cluster Validity, computed with the kdbcv backend on a stratified sample. Higher = better separated clusters. NEARLY DETERMINED BY n_clusters (rho=-0.966) - not an independent quality score. BACKEND MATTERS: the deployed model's own metrics.json reports DBCV 0.4074 for fit1000000_mcs2500_ms15_eom because it is measured with the hdbscan backend over 70,000 stratified rows. This table reports 0.4313 from kdbcv. Same clustering, two estimators - the values are not interchangeable, and only the kdbcv column is comparable across the cells here.", "relative_validity": "CPU-only. Direct model attribute: model.relative_validity_ after hdbscan.HDBSCAN().fit(X). Computed internally during condensed-tree traversal \u2014 a faster DBCV approximation reusing the already-built tree. cuML defines the attribute but never populates it (stays NaN after fit). Range 0.197-0.346 across 24 CPU cells (1.76x spread vs DBCV 302x). Sanity check, not a discriminator.", "neg_cluster_frac": "CPU-only. Fraction of clusters with negative DBCV score. Higher = more poorly-separated clusters.", "neg_point_share": "CPU-only. Fraction of assigned (non-noise) points that belong to a cluster with negative DBCV. More interpretable than raw DBCV. \u03c1=\u22120.977 with DBCV.", "connect": "Connectivity: fraction of cluster pairs where nearest-neighbour connections are pure (k=10). Near 1.0 for all cells \u2014 uninformative for ranking on this grid.", "prob_mean": "Mean cluster membership probability (HDBSCAN soft clustering). Higher = more confident assignments.", "prob>0.8": "Fraction of assigned points with membership probability > 0.8.", "persist": "Median cluster persistence. DEGENERATE: exactly 1.0 for all clusters in 22/24 cells (\u2265175 clusters). Do not use to rank cells. Real distribution only for 88/89-cluster cells.", "persist_min": "CPU-only. Minimum cluster persistence across all clusters. 0.003\u20130.010 for 88/89-cluster cells; 1.0000 for all others.", "persist_max": "CPU-only. Maximum cluster persistence. 0.937\u20130.925 for 88/89-cluster cells; 1.0000 for all others.", "persist_frac_one": "CPU-only. Fraction of clusters where persistence \u2265 0.999. 1.0 for degenerate cells, 0.0 for the two well-behaved cells.", "cos_mean": "Unweighted mean cosine similarity between each cluster's raw SBS96 profile and its SigProfilerAssignment reconstruction from uv_only signatures. Formula: mean(cosine[c] for c in clusters). Every cluster counts equally regardless of size. Range 0.130\u20130.250 on this grid. 1.0 = perfect reconstruction; 0.0 = orthogonal (completely wrong shape). Low values indicate cohort mutation spectra fall outside the uv_only reference space.", "cos_wmean": "Mutation-count-weighted cosine similarity. Formula: sum(cosine[c] * n_mutations[c]) / total_mutations. Large clusters (many reads) dominate. cos_wmean < cos_mean means big clusters fit uv_only worse than small ones; cos_wmean > cos_mean means big clusters fit better. On this grid both are 0.13\u20130.27 with wmean often slightly above mean, because the largest clusters tend to be highly peaked (one dominant channel) which is easier to match.", "mut%>0.8": "Percentage of total cohort mutations that live in clusters where cosine similarity > 0.8. Formula: (sum(n_mutations[c] for c if cosine[c] > 0.8) / total_mutations) * 100. The column name contains a literal % \u2014 values are in percent units, NOT a fraction. CAN EXCEED 1 (e.g., 2.6 means 2.6% of mutations). Range on this grid: 0.0\u20132.6%. Meaning: only 0-3% of reads are in clusters SigProfiler can reconstruct with cosine > 0.8 from uv_only. The other 97-100% of reads are in clusters that fit uv_only poorly.", "top_chan": "Median top-channel share, computed directly from raw SBS96 counts (NOT from SigProfiler reconstruction). Per cluster: max(SBS96_counts[c]) / sum(SBS96_counts[c]) = fraction of that cluster's mutations in its single most common trinucleotide context (e.g. 'A[T>G]G'). The reported value is the MEDIAN of this fraction across all clusters. 0.57 = typical cluster has 57% of its mutations in one trinucleotide channel. 0.92 = typical cluster is almost entirely one context \u2014 extremely peaked. This is high on this grid (0.55-0.92) because HDBSCAN is grouping reads by trinucleotide context, which is a dominant axis in the VAE latent space.", "tc>0.5": "Fraction of clusters where top_channel_share > 0.5 (more than half of reads in a single trinucleotide channel). Formula: count(clusters where max(SBS96[c])/sum(SBS96[c]) > 0.5) / n_clusters. Also computed from raw SBS96 counts, not SigProfiler. 0.63 = 63% of clusters are single-channel-dominated. Complements top_chan median: tells you how many clusters are peaked, not just the typical one. On this grid: 0.61-0.88, meaning the majority of clusters in every cell are single-channel dominated.", "l1%_mean": "Mean L1 residual expressed as % of cluster mutation count. Per cluster: sum(|observed[c,j] - reconstructed[c,j]| for j in 96 channels) / n_mutations[c] * 100. EXCEEDS 100% because uv_only overshoots some channels while undershooting others \u2014 the absolute errors from all channels that are wrong in either direction sum to more than the total count. 168\u2013177% on this grid means the reconstruction has roughly 1.7x the total mutation count worth of absolute error \u2014 the wrong shape is being fitted in both positive and negative directions simultaneously.", "l2%_mean": "Mean L2 (Euclidean) residual as % of cluster mutation count. sqrt(sum((observed[c,j]-reconstructed[c,j])^2)) / n_mutations[c] * 100. Same interpretation as L1% \u2014 can exceed 100% for the same reason. L2 penalises large per-channel errors more than L1.", "outlier_p50": "CPU-only. Median outlier score. Points deep inside clusters score near 0; points near cluster boundaries score higher; noise points score 1.", "outlier_p99": "CPU-only. 99th-percentile outlier score. < 1.0 only for 88/89-cluster cells (0.979, 0.950). Exactly 1.0 for all other cells \u2014 in high-granularity solutions most points are treated as extreme outliers.", "fit_s": "Seconds to run HDBSCAN fit. NOT a valid backend benchmark \u2014 dominated by shared data-loading overhead. cuML and CPU give nearly identical times.", "label_s": "Seconds to apply cluster labels to the full 157.5M-row cohort (RBC approximate nearest-centroid). CPU is 7.9% faster than cuML overall."}};
+
+const COL_DEFS = [
+  {k:"n_clusters",    h:"N clusters", dp:0, dir:0,  tip:"Clusters found (excl. noise)"},
+  {k:"noise_pct",     h:"Noise %",    dp:2, dir:-1, tip:"% reads assigned to noise"},
+  {k:"dbcv",          h:"DBCV",       dp:3, dir:1,  tip:"Density-based cluster validity, kdbcv backend (higher=better). Deployed model reports 0.4074 via the hdbscan backend - see glossary."},
+  {k:"rel_validity",  h:"Rel val",    dp:3, dir:1,  tip:"Relative validity (CPU-only; — for 25M fit)"},
+  {k:"neg_dbcv_frac", h:"Neg-DBCV%",  dp:3, dir:-1, tip:"Fraction of points in neg-scored clusters (CPU-only)"},
+  {k:"cos_mean",      h:"Cos mean",   dp:3, dir:1,  tip:"Mean cosine sim to assigned SigProfiler signature"},
+  {k:"pct_mut_cos08", h:"Mut>0.8%",   dp:2, dir:1,  tip:"% mutations in clusters with cosine similarity > 0.8"},
+  {k:"top_chan_med",  h:"Top chan",   dp:3, dir:0,  tip:"Median top-channel share (raw SBS96)"},
+  {k:"l1_resid",      h:"L1 res%",    dp:1, dir:-1, tip:"Mean L1 residual % of SigProfiler reconstruction"},
+  {k:"label_time",    h:"Label s",   dp:0, dir:0,  tip:"Seconds to label all 157.5M reads"},
+];
+
+const RECOMMENDED = new Set(["fit25000000_mcs2500_ms5_eom","fit1000000_mcs2500_ms15_eom"]);
+const FIT_ORDER  = [500000,1000000,5000000,25000000];
+const FIT_LABEL  = {500000:"500 K rows",1000000:"1 M rows",5000000:"5 M rows",25000000:"25 M rows"};
+
+// image path helpers — no base64, just relative paths served by Python
+function imgPath(type, label) {
+  if (type === "subst")   return "images/substitution/" + label + "_substitution.png";
+  if (type === "sigp")    return "images/sigprofiler/"  + label + "_sigprofiler.png";
+  if (type === "cosine")  return "images/cosine/"       + label + "_cosine.png";
+  if (type === "cluster") return "images/cluster/"      + label + "_cluster.png";
+}
+function atlasPath(key) {
+  if (key.startsWith("contact_sheet_"))
+    return "images/atlas/" + key + ".png";
+  return "images/atlas/umap_" + key + ".png";
+}
+
+// ── colour scale ────────────────────────────────────────────────────────────
+const COL_RANGE = {};
+COL_DEFS.forEach(col => {
+  const vals = DATA.cells.map(c => c[col.k]).filter(v => v !== null && v !== undefined);
+  COL_RANGE[col.k] = {mn: Math.min(...vals), mx: Math.max(...vals)};
+});
+
+function normVal(k, v) {
+  if (v === null || v === undefined) return null;
+  const {mn, mx} = COL_RANGE[k];
+  if (mx === mn) return 0.5;
+  const t = (v - mn) / (mx - mn);
+  const def = COL_DEFS.find(c => c.k === k);
+  return def.dir === -1 ? 1 - t : def.dir === 1 ? t : null;
+}
+
+function cellBg(t) {
+  if (t === null) return "";
+  const dark = document.documentElement.dataset.theme === "dark" ||
+    (!document.documentElement.dataset.theme && window.matchMedia("(prefers-color-scheme:dark)").matches);
+  const bad  = dark ? [122,31,26]  : [245,165,158];
+  const mid  = dark ? [22, 36, 46] : [240,244,246];
+  const good = dark ? [26,102,68]  : [126,207,160];
+  let r, g, b;
+  if (t <= 0.5) {
+    const s = t * 2;
+    r = bad[0]+(mid[0]-bad[0])*s; g = bad[1]+(mid[1]-bad[1])*s; b = bad[2]+(mid[2]-bad[2])*s;
+  } else {
+    const s = (t - 0.5) * 2;
+    r = mid[0]+(good[0]-mid[0])*s; g = mid[1]+(good[1]-mid[1])*s; b = mid[2]+(good[2]-mid[2])*s;
+  }
+  return `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+}
+
+// ── page 1 ─────────────────────────────────────────────────────────────────
+function buildPage1() {
+  document.getElementById("sel-thead").innerHTML = `<tr>
+    <th style="min-width:210px">Model</th>
+    ${COL_DEFS.map(c => `<th title="${c.tip}">${c.h}</th>`).join("")}
+  </tr>`;
+  let html = "";
+  FIT_ORDER.forEach(fit => {
+    const group = DATA.cells.filter(c => c.fit_rows === fit);
+    html += `<tr class="group-hdr"><td colspan="${COL_DEFS.length+1}">${FIT_LABEL[fit]}</td></tr>`;
+    group.forEach(cell => {
+      const isRec = RECOMMENDED.has(cell.label);
+      const short = `mcs ${cell.mcs} / ms ${cell.ms}`;
+      html += `<tr data-l="${cell.label}" class="${isRec?"rec":""}">`
+            + `<td><input type="checkbox" class="selchk" data-l="${cell.label}">`
+            + `<span class="mlabel">${short}</span></td>`;
+      COL_DEFS.forEach(col => {
+        const v = col.k === "rel_validity"  ? (cell.cpu ? cell.cpu.rel_validity : null)
+                : col.k === "neg_dbcv_frac" ? (cell.cpu ? cell.cpu.frac_pts_neg_dbcv : null)
+                : cell[col.k];
+        const t = normVal(col.k, v);
+        const bg = cellBg(t);
+        const txt = v === null ? `<span class="na-cell">—</span>` : v.toFixed(col.dp);
+        html += `<td style="${bg ? "background:"+bg : ""}">${txt}</td>`;
+      });
+      html += "</tr>";
+    });
+  });
+  document.getElementById("sel-tbody").innerHTML = html;
+}
+
+// ── page 2 ─────────────────────────────────────────────────────────────────
+let curTab = "subst";
+
+function fmtRows(r) { return r >= 1e6 ? (r/1e6).toFixed(r%1e6===0?0:1)+"M" : (r/1e3)+"K"; }
+
+function openDetail(label) {
+  const cell = DATA.cells.find(c => c.label === label);
+  const cpu  = cell.cpu || {};
+  const fitL = fmtRows(cell.fit_rows);
+
+  document.getElementById("detail-label").innerHTML =
+    label.replace(/_eom$/, "") +
+    (RECOMMENDED.has(label) ? '<span class="m-badge">★ recommended</span>' : "");
+  document.getElementById("detail-sublabel").textContent =
+    `fit ${fitL} · mcs ${cell.mcs} · ms ${cell.ms}`;
+
+  const sections = [
+    {title:"Clustering", rows:[
+      ["N clusters",       cell.n_clusters?.toFixed(0),          null],
+      ["Cohort noise",     cell.noise_pct?.toFixed(2)+"%",        cell.noise_pct<8?"good":cell.noise_pct>15?"bad":null],
+      ["DBCV",             cell.dbcv?.toFixed(4),                 cell.dbcv>0.35?"good":cell.dbcv<0.1?"bad":null],
+      ["Rel. validity",    cpu.rel_validity?.toFixed(4)??"—",     null],
+      ["Neg-DBCV frac",    cpu.frac_pts_neg_dbcv?.toFixed(4)??"—",cpu.frac_pts_neg_dbcv!=null?(cpu.frac_pts_neg_dbcv<0.15?"good":cpu.frac_pts_neg_dbcv>0.4?"bad":null):null],
+      ["Persistence med.", cell.persistence_med?.toFixed(4),      null],
+    ]},
+    {title:"Signature fit (uv_only)", rows:[
+      ["Cosine mean",      cell.cos_mean?.toFixed(4),             cell.cos_mean>0.29?"good":null],
+      ["Cosine wt-mean",   cell.cos_wtmean?.toFixed(4),           null],
+      ["Mut % cos>0.8",    cell.pct_mut_cos08?.toFixed(2)+"%",    null],
+      ["Top-channel med.", cell.top_chan_med?.toFixed(4),          null],
+      ["Frac tc>0.5",      cell.frac_topchan_05?.toFixed(4),      null],
+      ["L1 residual %",    cell.l1_resid?.toFixed(2),             cell.l1_resid<170?"good":cell.l1_resid>175?"bad":null],
+    ]},
+    {title:"Assignment quality", rows:[
+      ["Mean prob.",       cell.mean_prob?.toFixed(4),            null],
+      ["Frac prob>0.8",    cell.frac_prob_08?.toFixed(4),         null],
+    ]},
+    {title:"Timing", rows:[
+      ["Fit time",         cell.fit_time?.toFixed(1)+" s",        null],
+      ["Label time",       cell.label_time?.toFixed(1)+" s",      null],
+    ]},
+  ];
+  document.getElementById("metrics-col").innerHTML = sections.map(s =>
+    `<div class="m-section">
+      <div class="m-section-title">${s.title}</div>
+      ${s.rows.map(([k,v,cls]) =>
+        `<div class="m-row">
+          <span class="m-key">${k}</span>
+          <span class="m-val ${cls||""}">${v??"—"}</span>
+        </div>`).join("")}
+    </div>`
+  ).join("");
+
+  document.getElementById("pg-detail").dataset.label = label;
+  document.getElementById("pg-select").style.display = "none";
+  document.getElementById("pg-detail").style.display = "flex";
+  loadImg(label);
+}
+
+function loadImg(label) {
+  const img = document.getElementById("detail-img");
+  const cap = document.getElementById("img-cap");
+  img.src = imgPath(curTab, label);
+  const capText = curTab==="subst"   ? "substitution profile"
+    : curTab==="sigp"    ? "UMAP coloured by SigProfiler assignment"
+    : curTab==="cosine"  ? "UMAP coloured by cosine similarity to assigned signature"
+    : "UMAP coloured by HDBSCAN cluster (raw partitioning)";
+  cap.textContent = label.replace(/_eom$/,"") + " — " + capText;
+}
+
+// atlas chips — categorical | numeric columns, contact sheets as selectable chips at top
+function buildAtlasChips() {
+  const catFeats   = ['ALT', 'et', 'REF', 'st', 'tm', 'X_NEXT1', 'X_NEXT2', 'X_NEXT3', 'X_PREV1', 'X_PREV2', 'X_PREV3'];
+  const numFeats   = ['BCSQ', 'BCSQCSS', 'ed', 'EDIST', 'HAMDIST', 'HAMDIST_FILT', 'INDEX', 'l1', 'l2', 'l3', 'l4', 'l5', 'l6', 'l7', 'q2', 'q3', 'q4', 'q5', 'q6', 'REV', 'RL', 'rq', 'SCED', 'SCST', 'sd', 'SMQ_AFTER', 'SMQ_BEFORE', 'X_HMER_ALT', 'X_HMER_REF'];
+  const extraFeats = ['a3', 'AD_A', 'AD_C', 'AD_DEL', 'AD_G', 'AD_INS', 'AD_T', 'ADJ_REF_DIFF', 'CHROM', 'DP', 'DP_FILT', 'DP_MAPQ1', 'DS', 'DUP', 'FILT', 'FILT_BITMAP', 'MAPQ', 'MI', 'MQUAL', 'QUAL', 'RAW_VAF', 'RN', 'RPA', 'RU', 'SNVQ', 'STR', 'VAF', 'X_IC', 'X_IL'];
+
+  function chips(keys) {
+    return keys.map(k => `<button class="achip" data-feat="${k}" aria-pressed="false">${k}</button>`).join("");
+  }
+
+  // contact sheets as chips at the top of each column
+  document.getElementById("atlas-cat-chips").innerHTML =
+    `<button class="achip" data-feat="contact_sheet_categorical" aria-pressed="false" style="font-weight:600">All categorical</button>` +
+    chips(catFeats);
+
+  document.getElementById("atlas-num-chips").innerHTML =
+    `<button class="achip" data-feat="contact_sheet_numeric" aria-pressed="false" style="font-weight:600">All numeric</button>` +
+    chips(numFeats) +
+    `<span class="achip-sep">Excluded from training</span>` +
+    chips(extraFeats);
+
+  function handleChipClick(e) {
+    const btn = e.target.closest(".achip"); if (!btn) return;
+    document.querySelectorAll(".achip").forEach(b => b.setAttribute("aria-pressed","false"));
+    btn.setAttribute("aria-pressed","true");
+    const img = document.getElementById("atlas-img");
+    img.src = atlasPath(btn.dataset.feat);
+    img.style.display = "";
+    document.getElementById("atlas-cap").textContent =
+      btn.dataset.feat === "contact_sheet_categorical" ? "All categorical features" :
+      btn.dataset.feat === "contact_sheet_numeric"     ? "All numeric features" :
+      btn.dataset.feat;
+  }
+  document.getElementById("atlas-cat-chips").addEventListener("click", handleChipClick);
+  document.getElementById("atlas-num-chips").addEventListener("click", handleChipClick);
+}
+
+// ── zoom logic ──────────────────────────────────────────────────────────────
+// Resizes the img element so overflow:auto can scroll to any region.
+// Zoom is always centred on the viewport centre point.
+const PAD = 12;
+
+function makeZoom(imgId, wrapId, zoomInId, zoomOutId, zoomRstId) {
+  let z = 1;
+  const img  = () => document.getElementById(imgId);
+  const wrap = () => document.getElementById(wrapId);
+
+  // Fit size at z=1: scale natural image to fill the container (object-fit:contain)
+  function fitPx() {
+    const el = img(), wr = wrap();
+    const iw = el.naturalWidth, ih = el.naturalHeight;
+    if (!iw || !ih) return null;
+    const s = Math.min((wr.clientWidth - PAD*2) / iw, (wr.clientHeight - PAD*2) / ih);
+    return { w: iw * s, h: ih * s };
+  }
+
+  // Apply a new zoom level, keeping the viewport centre fixed in image coords.
+  function applyZoom(newZ) {
+    const dims = fitPx(); if (!dims) return;
+    const wr = wrap(), el = img();
+    const wrapW = wr.clientWidth, wrapH = wr.clientHeight;
+
+    // --- record where the viewport centre sits in the image before zoom ---
+    const oldW = dims.w * z, oldH = dims.h * z;
+    const wasSmall = oldW <= wrapW - PAD*2 && oldH <= wrapH - PAD*2;
+    // Image top-left in viewport coordinates
+    const imgVL = wasSmall ? (wrapW - oldW) / 2 : PAD - wr.scrollLeft;
+    const imgVT = wasSmall ? (wrapH - oldH) / 2 : PAD - wr.scrollTop;
+    // Fraction of image at viewport centre
+    const fracX = oldW > 0 ? (wrapW/2 - imgVL) / oldW : 0.5;
+    const fracY = oldH > 0 ? (wrapH/2 - imgVT) / oldH : 0.5;
+
+    // --- apply new size ---
+    z = newZ;
+    const newW = dims.w * z, newH = dims.h * z;
+    el.style.width = `${newW}px`; el.style.height = `${newH}px`; el.style.maxWidth = "none";
+
+    const isSmall = newW <= wrapW - PAD*2 && newH <= wrapH - PAD*2;
+    wr.style.alignItems     = isSmall ? "center" : "flex-start";
+    wr.style.justifyContent = isSmall ? "center" : "flex-start";
+
+    // --- restore viewport centre ---
+    if (!isSmall) {
+      // With flex-start + PAD: image left edge is at PAD in scroll space.
+      // We want fracX*newW to appear at wrapW/2 → scrollLeft = PAD + fracX*newW - wrapW/2
+      wr.scrollLeft = Math.max(0, PAD + fracX * newW - wrapW / 2);
+      wr.scrollTop  = Math.max(0, PAD + fracY * newH - wrapH / 2);
+    }
+  }
+
+  function reset() {
+    const wr = wrap(); wr.scrollLeft = 0; wr.scrollTop = 0;
+    wr.style.alignItems = "center"; wr.style.justifyContent = "center";
+    z = 1;
+    const dims = fitPx(); if (!dims) return;
+    const el = img();
+    el.style.width = `${dims.w}px`; el.style.height = `${dims.h}px`; el.style.maxWidth = "none";
+  }
+
+  img().addEventListener("load", reset);
+  if (img().complete && img().naturalWidth) reset();
+
+  document.getElementById(zoomInId) .addEventListener("click", () => applyZoom(Math.min(z * 1.3, 10)));
+  document.getElementById(zoomOutId).addEventListener("click", () => applyZoom(Math.max(z / 1.3, 0.15)));
+  document.getElementById(zoomRstId).addEventListener("click", reset);
+  wrap().addEventListener("wheel", e => {
+    e.preventDefault();
+    applyZoom(e.deltaY < 0 ? Math.min(z * 1.12, 10) : Math.max(z / 1.12, 0.15));
+  }, {passive: false});
+  window.addEventListener("resize", () => { if (z === 1) reset(); });
+
+  return { reset };
+}
+
+// ── multi-select + compare ──────────────────────────────────────────────────
+const selected = new Set();
+let cmpTab = "subst";
+
+function refreshSelUI() {
+  document.getElementById("cmp-n").textContent = selected.size;
+  document.getElementById("cmp-bar").classList.toggle("on", selected.size > 0);
+  document.getElementById("cmp-go").disabled = selected.size < 2;
+  document.getElementById("cmp-go").textContent =
+    selected.size < 2 ? "Select 2+ to compare" : `Compare ${selected.size} plots →`;
+  document.getElementById("cmp-names").textContent =
+    [...selected].map(l => l.replace(/^fit/, "").replace(/_eom$/, "")).join("   ·   ");
+  document.querySelectorAll("#sel-tbl tbody tr[data-l]").forEach(tr => {
+    tr.classList.toggle("picked", selected.has(tr.getAttribute("data-l")));
+  });
+}
+
+function renderCompare() {
+  const grid = document.getElementById("cmp-grid");
+  const labels = DATA.cells.filter(c => selected.has(c.label)).map(c => c.label); // keep sweep order
+  const cmpTabLabel = cmpTab==="subst"   ? "substitution profile"
+    : cmpTab==="sigp"    ? "UMAP + SigProfiler"
+    : cmpTab==="cosine"  ? "cosine similarity"
+    : "HDBSCAN clusters";
+  document.getElementById("cmp-sub").textContent = `${labels.length} models · ${cmpTabLabel}`;
+
+  grid.innerHTML = labels.map(label => {
+    const c = DATA.cells.find(x => x.label === label);
+    return `<div class="cmp-panel ${RECOMMENDED.has(label) ? "rec" : ""}">
+      <div class="cmp-panel-hdr">
+        <span class="cmp-panel-t">${RECOMMENDED.has(label) ? "★ " : ""}fit ${fmtRows(c.fit_rows)} · mcs ${c.mcs} · ms ${c.ms}</span>
+        <span class="cmp-panel-s">${c.n_clusters} cl · ${c.noise_pct.toFixed(1)}% noise</span>
+      </div>
+      <div class="cmp-panel-img" data-full="${imgPath(cmpTab, label)}" data-label="${label}">
+        <img src="${imgPath(cmpTab, label)}" alt="${label}" loading="lazy">
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function openCompare() {
+  if (selected.size < 2) return;
+  document.getElementById("pg-select").style.display  = "none";
+  document.getElementById("pg-detail").style.display  = "none";
+  document.getElementById("pg-compare").style.display = "flex";
+  renderCompare();
+}
+
+// ── fullscreen modal ────────────────────────────────────────────────────────
+function openModal(src, title) {
+  document.getElementById("modal-title").textContent = title;
+  document.getElementById("modal").classList.add("on");
+  document.getElementById("modal-img").src = src;   // set after show, so wrap has size
+}
+function closeModal() {
+  document.getElementById("modal").classList.remove("on");
+}
+
+// ── drag-to-pan ─────────────────────────────────────────────────────────────
+function addPan(wrapId) {
+  const wrap = document.getElementById(wrapId);
+  let down = false, ox, oy, sl, st;
+
+  wrap.addEventListener("mousedown", e => {
+    if (e.button !== 0) return;
+    down = true; ox = e.clientX; oy = e.clientY;
+    sl = wrap.scrollLeft; st = wrap.scrollTop;
+    wrap.style.cursor = "grabbing";
+    e.preventDefault();
+  });
+  window.addEventListener("mousemove", e => {
+    if (!down) return;
+    wrap.scrollLeft = sl - (e.clientX - ox);
+    wrap.scrollTop  = st - (e.clientY - oy);
+  });
+  window.addEventListener("mouseup", () => {
+    if (!down) return;
+    down = false;
+    wrap.style.cursor = "grab";
+  });
+  // prevent browser's native image drag
+  wrap.querySelector("img")?.addEventListener("dragstart", e => e.preventDefault());
+}
+
+// tab switching — unified handler for both tab bars
+document.querySelectorAll(".itab").forEach(btn => {
+  btn.addEventListener("click", () => {
+    curTab = btn.dataset.itab;
+    const isAtlas = curTab === "atlas";
+    document.getElementById("img-col").style.display     = isAtlas ? "none" : "flex";
+    document.getElementById("atlas-panel").style.display = isAtlas ? "flex"  : "none";
+    // sync aria-selected on both tab bars
+    document.querySelectorAll(`.itab[data-itab="${curTab}"]`)
+      .forEach(b => b.setAttribute("aria-selected","true"));
+    document.querySelectorAll(`.itab:not([data-itab="${curTab}"])`)
+      .forEach(b => b.setAttribute("aria-selected","false"));
+    if (!isAtlas) {
+      const l = document.getElementById("pg-detail").dataset.label;
+      if (l) { loadImg(l); cellZoom?.reset(); }
+    }
+  });
+});
+
+document.getElementById("back-btn").addEventListener("click", () => {
+  document.getElementById("pg-detail").style.display = "none";
+  document.getElementById("pg-select").style.display = "flex";
+});
+
+// row click — checkbox toggles selection, anywhere else opens the detail view
+document.getElementById("sel-tbody").addEventListener("click", e => {
+  const chk = e.target.closest(".selchk");
+  if (chk) {
+    const l = chk.getAttribute("data-l");
+    if (chk.checked) selected.add(l); else selected.delete(l);
+    refreshSelUI();
+    e.stopPropagation();
+    return;
+  }
+  const row = e.target.closest("tr[data-l]"); if (!row) return;
+  curTab = "subst";
+  document.getElementById("img-col").style.display    = "flex";
+  document.getElementById("atlas-panel").style.display = "none";
+  document.querySelectorAll('.itab[data-itab="subst"]').forEach(b => b.setAttribute("aria-selected","true"));
+  document.querySelectorAll('.itab:not([data-itab="subst"])').forEach(b => b.setAttribute("aria-selected","false"));
+  openDetail(row.getAttribute("data-l"));
+  cellZoom?.reset();
+});
+
+buildPage1();
+buildAtlasChips();
+const cellZoom      = makeZoom("detail-img", "cell-zoom-wrap",  "cell-zoom-in",  "cell-zoom-out",  "cell-zoom-rst");
+const atlasZoomCtrl = makeZoom("atlas-img",  "atlas-zoom-wrap", "atlas-zoom-in", "atlas-zoom-out", "atlas-zoom-rst");
+addPan("cell-zoom-wrap");
+addPan("atlas-zoom-wrap");
+addPan("modal-body");
+const modalZoom = makeZoom("modal-img", "modal-body", "modal-zin", "modal-zout", "modal-zrst");
+
+// ── compare wiring ──────────────────────────────────────────────────────────
+document.getElementById("cmp-go")   .addEventListener("click", openCompare);
+document.getElementById("cmp-clear").addEventListener("click", () => {
+  selected.clear();
+  document.querySelectorAll(".selchk").forEach(c => { c.checked = false; });
+  refreshSelUI();
+});
+document.getElementById("cmp-back").addEventListener("click", () => {
+  document.getElementById("pg-compare").style.display = "none";
+  document.getElementById("pg-select").style.display  = "flex";
+});
+document.querySelectorAll(".ctab").forEach(btn => {
+  btn.addEventListener("click", () => {
+    cmpTab = btn.dataset.ctab;
+    document.querySelectorAll(".ctab").forEach(b =>
+      b.setAttribute("aria-selected", b === btn ? "true" : "false"));
+    renderCompare();
+  });
+});
+// click a compare panel → fullscreen
+document.getElementById("cmp-grid").addEventListener("click", e => {
+  const p = e.target.closest(".cmp-panel-img"); if (!p) return;
+  const modalCapLabel = cmpTab==="subst"  ? "substitution profile"
+    : cmpTab==="sigp"   ? "UMAP + SigProfiler"
+    : cmpTab==="cosine" ? "cosine similarity"
+    : "HDBSCAN clusters";
+  openModal(p.dataset.full, p.dataset.label.replace(/_eom$/, "") + " — " + modalCapLabel);
+});
+document.getElementById("modal-close").addEventListener("click", closeModal);
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeModal();
+});
+
+refreshSelUI();
+</script>
+</body>
+</html>

@@ -101,7 +101,7 @@ parquet_files/
 
 # Full sweep trees
 umap_hdbscan_sweep/
-hdbscan_sweep/
+hdbscan_sweep/images/
 hdbscan_sweep.zip
 per_parquet_reports.tar.gz
 plots/
