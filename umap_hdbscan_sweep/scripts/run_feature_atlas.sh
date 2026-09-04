@@ -64,10 +64,10 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 if [ -d "$HOME/pure-internship/clust_regime_sweep/cohort_reports_original" ]; then
     DEFAULT_REPORTS="$HOME/pure-internship/clust_regime_sweep/cohort_reports_original"
-    DEFAULT_SCRIPT="$HOME/pure-internship/umap_hdbscan_sweep/plot_feature_atlas.py"
+    DEFAULT_SCRIPT="$HOME/pure-internship/umap_hdbscan_sweep/plots/plot_feature_atlas.py"
 else
     DEFAULT_REPORTS="$REPO_ROOT/clust_regime_sweep/cohort_reports_original"
-    DEFAULT_SCRIPT="$REPO_ROOT/umap_hdbscan_sweep/plot_feature_atlas.py"
+    DEFAULT_SCRIPT="$REPO_ROOT/umap_hdbscan_sweep/plots/plot_feature_atlas.py"
 fi
 
 REPORTS_DIR="${REPORTS_DIR:-$DEFAULT_REPORTS}"

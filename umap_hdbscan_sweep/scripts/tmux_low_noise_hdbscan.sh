@@ -86,8 +86,8 @@ if [ "${SKIP_ATLAS:-0}" != "1" ]; then
     ATLAS_DIR="${ATLAS_DIR:-$OUTPUT_DIR/feature_atlas}"
     EMBED_SUMMARY="${EMBED_SUMMARY:-$HOME/pure-internship/uv_vae/runs/train_multi_20260802T192756Z/stage1_embed/embed_summary.json}"
     echo "===== feature atlas  $(date -u) =====" | tee -a "$LOG"
-    sed -i 's/\r$//' "$SCRIPT_DIR/plot_feature_atlas.py" 2>/dev/null || true
-    python "$SCRIPT_DIR/plot_feature_atlas.py" \
+    sed -i 's/\r$//' "$SCRIPT_DIR/../plots/plot_feature_atlas.py" 2>/dev/null || true
+    python "$SCRIPT_DIR/../plots/plot_feature_atlas.py" \
         --embed-summary   "$EMBED_SUMMARY" \
         --coords          "$COORDS" \
         --cluster-labels  "$OUTPUT_DIR/cluster_labels.parquet" \
